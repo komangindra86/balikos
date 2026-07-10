@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "BALIKOS",
+    "slug": "balikos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "balikos",
+    "extra": {
+      "googleWebClientId": "",
+      "googleAndroidClientId": ""
+    },
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/logo-balikos.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f7fbff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "id.balisantih.balikos",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#063a8f"
+      }
+    },
+    "plugins": [
+      "expo-web-browser"
+    ]
+  }
+}
