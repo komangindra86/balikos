@@ -22,6 +22,7 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#063a8f"

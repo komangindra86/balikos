@@ -10,6 +10,8 @@ Route::get('/', function () {
     return redirect()->route('dashboard');
 });
 
+Route::view('/privacy-policy', 'legal.privacy-policy')->name('privacy-policy');
+Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.store');
 Route::get('/balikos/portal/{token}', [BalikosPortalController::class, 'show'])->name('balikos.portal.show');

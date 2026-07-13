@@ -1,0 +1,8 @@
+Rilis awal BALIKOS.
+
+- Kelola kos, kamar, penghuni, dan fasilitas kamar.
+- Buat dan pantau tagihan penghuni.
+- Verifikasi pembayaran transfer dan catat pembayaran tunai.
+- Bagikan portal penghuni untuk melihat tagihan dan upload bukti pembayaran.
+- Kelola metode pembayaran transfer bank dan QRIS.
+- Pantau laporan keuangan kos.

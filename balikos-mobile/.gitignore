@@ -1,5 +1,8 @@
 node_modules/
 .expo/
+android/
+credentials/
+*.aab
 dist/
 dist-check/
 npm-debug.log*
