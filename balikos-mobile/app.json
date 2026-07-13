@@ -7,6 +7,7 @@
     "scheme": "balikos",
     "extra": {
       "apiBase": "https://api.balikos.id/api/balikos",
+      "portalOrigin": "https://api.balikos.id",
       "googleWebClientId": "",
       "googleAndroidClientId": ""
     },

@@ -14,7 +14,7 @@ import FormField from './src/components/FormField';
 import { PrimaryButton, SecondaryButton } from './src/components/Buttons';
 
 const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://api.balikos.id/api/balikos';
-const DEFAULT_PORTAL_ORIGIN = 'http://balikos.test';
+const DEFAULT_PORTAL_ORIGIN = Constants.expoConfig?.extra?.portalOrigin || 'https://api.balikos.id';
 const balikosLogo = require('./assets/logo-balikos.png');
 
 WebBrowser.maybeCompleteAuthSession();
