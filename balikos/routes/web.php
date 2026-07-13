@@ -10,6 +10,13 @@ Route::get('/', function () {
     return redirect()->route('dashboard');
 });
 
+Route::get('/health', function () {
+    return response()->json([
+        'ok' => true,
+        'app' => 'BALIKOS',
+        'time' => now()->toIso8601String(),
+    ]);
+})->name('health');
 Route::view('/privacy-policy', 'legal.privacy-policy')->name('privacy-policy');
 Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
