@@ -14,7 +14,7 @@ Ya. Production harus memakai HTTPS.
 
 Ya. Gunakan URL:
 
-`https://api.balikos.id/account-deletion`
+`https://balikos.balisantih.com/account-deletion`
 
 ## Data yang Dikumpulkan
 

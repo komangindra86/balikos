@@ -6,12 +6,18 @@ Domain yang dipakai aplikasi mobile:
 https://api.balikos.id
 ```
 
+Domain yang dipakai untuk halaman legal dan portal penghuni:
+
+```text
+https://balikos.balisantih.com
+```
+
 Endpoint wajib sebelum Play Store rollout:
 
 ```text
-GET  https://api.balikos.id/health
-GET  https://api.balikos.id/privacy-policy
-GET  https://api.balikos.id/account-deletion
+GET  https://balikos.balisantih.com/privacy-policy
+GET  https://balikos.balisantih.com/account-deletion
+GET  https://balikos.balisantih.com/balikos/portal/{token}
 POST https://api.balikos.id/api/balikos/login
 ```
 
@@ -104,9 +110,8 @@ server {
 Jalankan dari luar server:
 
 ```bash
-curl -i https://api.balikos.id/health
-curl -i https://api.balikos.id/privacy-policy
-curl -i https://api.balikos.id/account-deletion
+curl -i https://balikos.balisantih.com/privacy-policy
+curl -i https://balikos.balisantih.com/account-deletion
 curl -i -X POST https://api.balikos.id/api/balikos/login \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"demo-owner@balikos.id\",\"password\":\"password-demo\",\"device_name\":\"smoke\"}"

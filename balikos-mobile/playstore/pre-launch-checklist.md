@@ -4,8 +4,8 @@
 
 - [ ] `https://api.balikos.id` sudah live dengan HTTPS valid.
 - [ ] `POST https://api.balikos.id/api/balikos/login` tidak 404.
-- [ ] `https://api.balikos.id/privacy-policy` bisa dibuka publik.
-- [ ] `https://api.balikos.id/account-deletion` bisa dibuka publik.
+- [ ] `https://balikos.balisantih.com/privacy-policy` bisa dibuka publik.
+- [ ] `https://balikos.balisantih.com/account-deletion` bisa dibuka publik.
 - [ ] Google OAuth Client ID sudah diisi jika tombol Google Login ingin ditampilkan.
 - [ ] Demo account reviewer sudah dibuat di production.
 - [ ] Screenshot Play Store sudah dibuat dari device/emulator.
