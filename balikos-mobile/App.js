@@ -13,7 +13,7 @@ import { colors, spacing } from './src/theme';
 import FormField from './src/components/FormField';
 import { PrimaryButton, SecondaryButton } from './src/components/Buttons';
 
-const DEFAULT_API = 'http://10.0.2.2:8010/api/balikos';
+const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://api.balikos.id/api/balikos';
 const DEFAULT_PORTAL_ORIGIN = 'http://balikos.test';
 const balikosLogo = require('./assets/logo-balikos.png');
 
@@ -118,10 +118,6 @@ export default function App() {
   const waitingVerificationRef = useRef(null);
   const googleWebClientId = Constants.expoConfig?.extra?.googleWebClientId || '';
   const googleAndroidClientId = Constants.expoConfig?.extra?.googleAndroidClientId || '';
-  const [googleRequest, googleResponse, promptGoogleLogin] = Google.useIdTokenAuthRequest({
-    webClientId: googleWebClientId || 'balikos-placeholder-web.apps.googleusercontent.com',
-    androidClientId: googleAndroidClientId || 'balikos-placeholder-android.apps.googleusercontent.com',
-  });
 
   const activeKos = useMemo(() => kosList.find((item) => item.id === activeKosId), [kosList, activeKosId]);
   const emptyRooms = useMemo(() => rooms.filter((room) => room.status === 'kosong'), [rooms]);
@@ -148,16 +144,6 @@ export default function App() {
   useEffect(() => {
     if (tokenValue) registerPushToken();
   }, [tokenValue]);
-
-  useEffect(() => {
-    if (googleResponse?.type !== 'success') return;
-    const idToken = googleResponse.params?.id_token;
-    if (!idToken) {
-      Alert.alert('Login Google gagal', 'Token Google tidak diterima. Silakan coba lagi.');
-      return;
-    }
-    doGoogleLogin(idToken);
-  }, [googleResponse]);
 
   useEffect(() => {
     if (!tokenValue || !activeKosId) return;
@@ -225,16 +211,7 @@ export default function App() {
     }, 'Pendaftaran gagal');
   }
 
-  async function doGoogleLogin(idToken = null) {
-    if (!idToken) {
-      if (!googleWebClientId && !googleAndroidClientId) {
-        Alert.alert('Google login belum aktif', 'Google Client ID belum diisi di app.json. Isi dari Google Cloud Console sebelum build produksi.');
-        return;
-      }
-      await promptGoogleLogin();
-      return;
-    }
-
+  async function doGoogleLogin(idToken) {
     await submit(async () => {
       const response = await api('/google-login', { method: 'POST', body: { id_token: idToken, device_name: 'google-mobile' }, auth: false });
       await saveAuth(response.token);
@@ -747,7 +724,7 @@ export default function App() {
   }
 
   if (booting) return <Shell><Text style={styles.muted}>Memuat BALIKOS...</Text></Shell>;
-  if (!tokenValue) return <AuthScreen authMode={authMode} setAuthMode={setAuthMode} email={email} setEmail={setEmail} password={password} setPassword={setPassword} register={register} setRegister={setRegister} doLogin={doLogin} doRegister={doRegister} doGoogleLogin={() => doGoogleLogin()} loading={loading} googleDisabled={!googleRequest && Boolean(googleWebClientId || googleAndroidClientId)} />;
+  if (!tokenValue) return <AuthScreen authMode={authMode} setAuthMode={setAuthMode} email={email} setEmail={setEmail} password={password} setPassword={setPassword} register={register} setRegister={setRegister} doLogin={doLogin} doRegister={doRegister} doGoogleLogin={doGoogleLogin} loading={loading} googleWebClientId={googleWebClientId} googleAndroidClientId={googleAndroidClientId} />;
   if (kosList.length === 0) return <KosSetup form={kosForm} setForm={setKosForm} saveKos={saveKos} logout={logout} loading={loading} />;
 
   return (
@@ -790,6 +767,8 @@ export default function App() {
 }
 
 function AuthScreen(props) {
+  const googleReady = Boolean(props.googleWebClientId && props.googleAndroidClientId);
+
   return (
     <Shell>
       <View style={styles.authHeaderClean}>
@@ -802,12 +781,20 @@ function AuthScreen(props) {
         </View>
       </View>
       <Segment items={['login', 'register']} labels={{ login: 'Masuk', register: 'Daftar' }} value={props.authMode} onChange={props.setAuthMode} />
-      <SecondaryButton title="Masuk dengan Google" onPress={props.doGoogleLogin} style={styles.googleButton} />
-      <View style={styles.authDivider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>atau pakai email</Text>
-        <View style={styles.dividerLine} />
-      </View>
+      {googleReady ? (
+        <>
+          <GoogleLoginButton
+            webClientId={props.googleWebClientId}
+            androidClientId={props.googleAndroidClientId}
+            onToken={props.doGoogleLogin}
+          />
+          <View style={styles.authDivider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>atau pakai email</Text>
+            <View style={styles.dividerLine} />
+          </View>
+        </>
+      ) : null}
       {props.authMode === 'login' ? (
         <>
           <FormField label="Email" value={props.email} onChangeText={props.setEmail} keyboardType="email-address" />
@@ -826,6 +813,22 @@ function AuthScreen(props) {
       )}
     </Shell>
   );
+}
+
+function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
+  const [, response, promptGoogleLogin] = Google.useIdTokenAuthRequest({ webClientId, androidClientId });
+
+  useEffect(() => {
+    if (response?.type !== 'success') return;
+    const idToken = response.params?.id_token;
+    if (!idToken) {
+      Alert.alert('Login Google gagal', 'Token Google tidak diterima. Silakan coba lagi.');
+      return;
+    }
+    onToken(idToken);
+  }, [response]);
+
+  return <SecondaryButton title="Masuk dengan Google" onPress={() => promptGoogleLogin()} style={styles.googleButton} />;
 }
 
 function KosSetup({ form, setForm, saveKos, logout, loading }) {

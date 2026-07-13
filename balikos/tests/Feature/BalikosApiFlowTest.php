@@ -6,6 +6,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class BalikosApiFlowTest extends TestCase
@@ -53,7 +54,7 @@ class BalikosApiFlowTest extends TestCase
             'nama_lengkap' => 'Penghuni KTP Test',
             'tanggal_masuk' => now()->toDateString(),
             'status' => 'keluar',
-            'foto_ktp' => UploadedFile::fake()->image('ktp.jpg'),
+            'foto_ktp' => $this->fakePngUpload('ktp.png'),
         ])->assertCreated()->assertJsonPath('data.nama_lengkap', 'Penghuni KTP Test');
 
         $ktpPath = DB::table('penghunis')->where('nama_lengkap', 'Penghuni KTP Test')->value('foto_ktp');
@@ -79,7 +80,7 @@ class BalikosApiFlowTest extends TestCase
 
         $tagihanId = DB::table('tagihans')->where('penghuni_id', $penghuni['id'])->where('bulan', (int) $currentPeriod->month)->where('tahun', (int) $currentPeriod->year)->value('id');
         $this->post('/api/balikos/portal/'.$penghuni['portal_token'].'/tagihan/'.$tagihanId.'/bukti', [
-            'bukti_pembayaran' => UploadedFile::fake()->image('bukti.jpg'),
+            'bukti_pembayaran' => $this->fakePngUpload('bukti.png'),
             'metode_pembayaran' => 'transfer',
             'tanggal_bayar' => now()->toDateString(),
         ])->assertOk()->assertJsonPath('data.status', 'menunggu_verifikasi');
@@ -173,5 +174,70 @@ class BalikosApiFlowTest extends TestCase
             'isi' => 'Air mati jam 10 malam.',
             'status' => 'aktif',
         ])->assertCreated()->assertJsonPath('data.judul', 'Info Test');
+    }
+
+    public function test_qris_verification_is_idempotent_for_wallet_credit(): void
+    {
+        $login = $this->postJson('/api/balikos/login', [
+            'email' => 'pemilik@balikos.test',
+            'password' => 'password',
+            'device_name' => 'feature-test',
+        ])->assertOk()->json();
+
+        $token = $login['token'];
+        $kosId = DB::table('kos')->where('owner_id', $login['user']['id'])->value('id');
+
+        $this->withToken($token)->postJson('/api/balikos/payment-methods', [
+            'kos_id' => $kosId,
+            'jenis' => 'qris',
+            'is_active' => true,
+        ])->assertCreated();
+
+        $room = $this->withToken($token)->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'QRIS-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Test',
+            'harga_bulanan' => 1000000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+
+        $penghuni = $this->withToken($token)->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'nama_lengkap' => 'Penghuni QRIS Test',
+            'tanggal_masuk' => now()->toDateString(),
+            'status' => 'aktif',
+        ])->assertCreated()->json('data');
+
+        $this->withToken($token)->postJson('/api/balikos/tagihan/generate', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'bulan' => (int) now()->format('m'),
+            'tahun' => (int) now()->format('Y'),
+        ])->assertOk();
+
+        $tagihanId = DB::table('tagihans')->where('penghuni_id', $penghuni['id'])->value('id');
+        $walletId = DB::table('kos_wallets')->where('kos_id', $kosId)->value('id');
+        DB::table('kos_wallets')->where('id', $walletId)->update(['saldo_tersedia' => 0]);
+
+        $this->withToken($token)->putJson('/api/balikos/tagihan/'.$tagihanId.'/verifikasi')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'lunas');
+
+        $this->assertSame(1000000, (int) DB::table('kos_wallets')->where('id', $walletId)->value('saldo_tersedia'));
+
+        $this->withToken($token)->putJson('/api/balikos/tagihan/'.$tagihanId.'/verifikasi')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'lunas');
+
+        $this->assertSame(1000000, (int) DB::table('kos_wallets')->where('id', $walletId)->value('saldo_tersedia'));
+    }
+
+    private function fakePngUpload(string $name): UploadedFile
+    {
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.Str::random(16).'-'.$name;
+        file_put_contents($path, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='));
+
+        return new UploadedFile($path, $name, 'image/png', null, true);
     }
 }

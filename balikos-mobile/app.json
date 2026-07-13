@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "scheme": "balikos",
     "extra": {
+      "apiBase": "https://api.balikos.id/api/balikos",
       "googleWebClientId": "",
       "googleAndroidClientId": ""
     },
@@ -20,7 +21,6 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#063a8f"

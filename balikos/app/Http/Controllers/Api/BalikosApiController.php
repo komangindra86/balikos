@@ -647,44 +647,60 @@ class BalikosApiController extends Controller
 
     public function tagihanLunas(Request $request, int $id)
     {
-        $bill = $this->ownedRow($request, 'tagihans', $id);
-        $method = $request->input('metode_pembayaran', 'tunai');
-        $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
-        DB::table('tagihans')->where('id', $id)->update([
-            'status' => 'lunas',
-            'tanggal_bayar' => $request->input('tanggal_bayar', now()->toDateString()),
-            'metode_pembayaran' => $method,
-            'biaya_platform' => $fee,
-            'total_dibayar' => (int) $bill->nominal + $fee,
-            'tanggal_verifikasi' => now(),
-            'diverifikasi_oleh' => $this->user($request)->id,
-            'updated_at' => now(),
-        ]);
-        if ($method === 'qris') {
-            $this->creditQrisPayment($bill);
-        }
+        $this->ownedRow($request, 'tagihans', $id);
+
+        DB::transaction(function () use ($request, $id) {
+            $bill = $this->lockedOwnedBill($request, $id);
+            if ($bill->status === 'lunas') {
+                return;
+            }
+
+            $method = $request->input('metode_pembayaran', 'tunai');
+            $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
+            DB::table('tagihans')->where('id', $id)->update([
+                'status' => 'lunas',
+                'tanggal_bayar' => $request->input('tanggal_bayar', now()->toDateString()),
+                'metode_pembayaran' => $method,
+                'biaya_platform' => $fee,
+                'total_dibayar' => (int) $bill->nominal + $fee,
+                'tanggal_verifikasi' => now(),
+                'diverifikasi_oleh' => $this->user($request)->id,
+                'updated_at' => now(),
+            ]);
+            if ($method === 'qris') {
+                $this->creditQrisPayment($bill);
+            }
+        });
 
         return response()->json(['message' => 'Tagihan ditandai lunas.', 'data' => $this->billWithUrls($this->ownedRow($request, 'tagihans', $id))]);
     }
 
     public function tagihanVerifikasi(Request $request, int $id)
     {
-        $bill = $this->ownedRow($request, 'tagihans', $id);
-        $method = $bill->metode_pembayaran ?: ($this->activeQrisMethod((int) $bill->kos_id) ? 'qris' : 'transfer');
-        $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
-        DB::table('tagihans')->where('id', $id)->update([
-            'status' => 'lunas',
-            'tanggal_verifikasi' => now(),
-            'tanggal_bayar' => now()->toDateString(),
-            'metode_pembayaran' => $method,
-            'biaya_platform' => $fee,
-            'total_dibayar' => (int) $bill->nominal + $fee,
-            'diverifikasi_oleh' => $this->user($request)->id,
-            'updated_at' => now(),
-        ]);
-        if ($method === 'qris') {
-            $this->creditQrisPayment($bill);
-        }
+        $this->ownedRow($request, 'tagihans', $id);
+
+        DB::transaction(function () use ($request, $id) {
+            $bill = $this->lockedOwnedBill($request, $id);
+            if ($bill->status === 'lunas') {
+                return;
+            }
+
+            $method = $bill->metode_pembayaran ?: ($this->activeQrisMethod((int) $bill->kos_id) ? 'qris' : 'transfer');
+            $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
+            DB::table('tagihans')->where('id', $id)->update([
+                'status' => 'lunas',
+                'tanggal_verifikasi' => now(),
+                'tanggal_bayar' => now()->toDateString(),
+                'metode_pembayaran' => $method,
+                'biaya_platform' => $fee,
+                'total_dibayar' => (int) $bill->nominal + $fee,
+                'diverifikasi_oleh' => $this->user($request)->id,
+                'updated_at' => now(),
+            ]);
+            if ($method === 'qris') {
+                $this->creditQrisPayment($bill);
+            }
+        });
 
         return response()->json(['message' => 'Pembayaran berhasil diverifikasi.', 'data' => $this->billWithUrls($this->ownedRow($request, 'tagihans', $id))]);
     }
@@ -948,6 +964,18 @@ class BalikosApiController extends Controller
     private function ownedRow(Request $request, string $table, int $id)
     {
         $row = DB::table($table)->where('id', $id)->whereIn('kos_id', $this->ownedKosIds($request))->first();
+        abort_if(! $row, 404, 'Data tidak ditemukan.');
+
+        return $row;
+    }
+
+    private function lockedOwnedBill(Request $request, int $id)
+    {
+        $row = DB::table('tagihans')
+            ->where('id', $id)
+            ->whereIn('kos_id', $this->ownedKosIds($request))
+            ->lockForUpdate()
+            ->first();
         abort_if(! $row, 404, 'Data tidak ditemukan.');
 
         return $row;
