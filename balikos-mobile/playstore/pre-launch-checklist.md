@@ -2,8 +2,8 @@
 
 ## Wajib Sebelum Upload AAB
 
-- [ ] `https://api.balikos.id` sudah live dengan HTTPS valid.
-- [ ] `POST https://api.balikos.id/api/balikos/login` tidak 404.
+- [ ] `https://balikos.balisantih.com` sudah live dengan HTTPS valid.
+- [ ] `POST https://balikos.balisantih.com/api/balikos/login` tidak 404.
 - [ ] `https://balikos.balisantih.com/privacy-policy` bisa dibuka publik.
 - [ ] `https://balikos.balisantih.com/account-deletion` bisa dibuka publik.
 - [ ] Google OAuth Client ID sudah diisi jika tombol Google Login ingin ditampilkan.

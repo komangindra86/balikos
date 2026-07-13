@@ -13,7 +13,7 @@ import { colors, spacing } from './src/theme';
 import FormField from './src/components/FormField';
 import { PrimaryButton, SecondaryButton } from './src/components/Buttons';
 
-const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://api.balikos.id/api/balikos';
+const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://balikos.balisantih.com/api/balikos';
 const DEFAULT_PORTAL_ORIGIN = Constants.expoConfig?.extra?.portalOrigin || 'https://balikos.balisantih.com';
 const balikosLogo = require('./assets/logo-balikos.png');
 
@@ -125,7 +125,8 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const storedApi = await AsyncStorage.getItem('api_base');
-      const savedApi = !storedApi || storedApi === 'http://10.0.2.2/api/balikos' ? DEFAULT_API : storedApi;
+      const oldApiHosts = ['http://10.0.2.2/api/balikos', 'https://api.balikos.id/api/balikos'];
+      const savedApi = !storedApi || oldApiHosts.includes(storedApi) ? DEFAULT_API : storedApi;
       const savedToken = await AsyncStorage.getItem('token');
       setApiBaseValue(savedApi);
       setApiBase(savedApi);

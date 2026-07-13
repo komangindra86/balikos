@@ -14,12 +14,12 @@ Folder ini berisi teks dan checklist yang bisa dipakai saat membuat listing apli
 
 ## URL Penting
 
-- API production: `https://api.balikos.id/api/balikos`
+- API production: `https://balikos.balisantih.com/api/balikos`
 - Portal penghuni: `https://balikos.balisantih.com/balikos/portal/{token}`
 - Privacy policy: `https://balikos.balisantih.com/privacy-policy`
 - Account deletion: `https://balikos.balisantih.com/account-deletion`
 
-Pastikan domain `https://balikos.balisantih.com` sudah live untuk halaman legal dan portal. API `https://api.balikos.id` tetap harus live untuk login dan fitur aplikasi.
+Pastikan domain `https://balikos.balisantih.com` sudah live untuk API, halaman legal, dan portal penghuni.
 
 ## File AAB
 

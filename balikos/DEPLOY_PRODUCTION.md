@@ -3,12 +3,6 @@
 Domain yang dipakai aplikasi mobile:
 
 ```text
-https://api.balikos.id
-```
-
-Domain yang dipakai untuk halaman legal dan portal penghuni:
-
-```text
 https://balikos.balisantih.com
 ```
 
@@ -18,7 +12,7 @@ Endpoint wajib sebelum Play Store rollout:
 GET  https://balikos.balisantih.com/privacy-policy
 GET  https://balikos.balisantih.com/account-deletion
 GET  https://balikos.balisantih.com/balikos/portal/{token}
-POST https://api.balikos.id/api/balikos/login
+POST https://balikos.balisantih.com/api/balikos/login
 ```
 
 `/api/balikos/login` tidak boleh 404. Untuk kredensial salah, respons normal biasanya `422` atau `401`.
@@ -79,7 +73,7 @@ php artisan queue:work --tries=3
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name api.balikos.id;
+    server_name balikos.balisantih.com;
 
     root /var/www/balikos/public;
     index index.php index.html;
@@ -103,7 +97,7 @@ server {
 
 ## Cloudflare/DNS
 
-`api.balikos.id` harus mengarah ke IP origin server yang menjalankan Laravel. Jika sekarang muncul `DEPLOYMENT_NOT_FOUND`, berarti domain masih mengarah ke deployment/hosting yang belum berisi aplikasi BALIKOS atau belum dikaitkan ke project yang benar.
+`balikos.balisantih.com` harus mengarah ke IP origin server yang menjalankan Laravel.
 
 ## Smoke Test
 
@@ -112,7 +106,7 @@ Jalankan dari luar server:
 ```bash
 curl -i https://balikos.balisantih.com/privacy-policy
 curl -i https://balikos.balisantih.com/account-deletion
-curl -i -X POST https://api.balikos.id/api/balikos/login \
+curl -i -X POST https://balikos.balisantih.com/api/balikos/login \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"demo-owner@balikos.id\",\"password\":\"password-demo\",\"device_name\":\"smoke\"}"
 ```

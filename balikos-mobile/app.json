@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "scheme": "balikos",
     "extra": {
-      "apiBase": "https://api.balikos.id/api/balikos",
+      "apiBase": "https://balikos.balisantih.com/api/balikos",
       "portalOrigin": "https://balikos.balisantih.com",
       "googleWebClientId": "",
       "googleAndroidClientId": ""
