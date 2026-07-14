@@ -3,7 +3,7 @@
 Gunakan informasi ini untuk Google OAuth Android Client dan catatan Play Console.
 
 - Package name: `id.balisantih.balikos`
-- Current Android versionCode: `2`
+- Current Android versionCode: `3`
 - Upload key alias: `balikos-upload`
 - Upload key SHA-1:
 

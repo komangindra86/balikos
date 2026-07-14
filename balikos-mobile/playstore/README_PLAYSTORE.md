@@ -7,7 +7,7 @@ Folder ini berisi teks dan checklist yang bisa dipakai saat membuat listing apli
 - App name: BALIKOS
 - Package name: `id.balisantih.balikos`
 - Version: `1.0.0`
-- Android versionCode: `2`
+- Android versionCode: `3`
 - Kategori: Business
 - Default language: Indonesian (id-ID)
 - App icon: `assets/playstore-icon.png` (512x512)

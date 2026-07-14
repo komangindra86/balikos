@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -774,7 +774,7 @@ function AuthScreen(props) {
     <Shell>
       <View style={styles.authHeaderClean}>
         <View style={styles.authTopRow}>
-          <Image source={balikosLogo} style={styles.authLogo} resizeMode="cover" />
+          <Image source={balikosLogo} style={styles.authLogo} resizeMode="contain" />
           <View style={{ flex: 1 }}>
             <Text style={styles.authBrand}>BALIKOS</Text>
             <Text style={styles.authTagline}>Kelola kos, tenang setiap saat</Text>
@@ -836,7 +836,7 @@ function KosSetup({ form, setForm, saveKos, logout, loading }) {
   return (
     <Shell>
       <LinearGradient colors={['#052f78', '#0a63c7']} style={styles.authHero}>
-        <Image source={balikosLogo} style={styles.heroLogo} resizeMode="cover" />
+        <Image source={balikosLogo} style={styles.heroLogo} resizeMode="contain" />
         <Text style={[styles.eyebrow, styles.heroEyebrow]}>Setup Awal</Text>
         <Text style={styles.heroTitle}>Buat Kos</Text>
         <Text style={styles.heroText}>Pemilik baru perlu membuat data kos dulu, lalu kamar dan penghuni bisa ditambahkan.</Text>
@@ -1512,16 +1512,32 @@ const paymentOptionRows = [
 ];
 
 function Shell({ children }) {
-  return <ScrollView style={styles.app} contentContainerStyle={styles.content}>{children}</ScrollView>;
+  return (
+    <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        contentContainerStyle={styles.content}
+      >
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
 }
 
 function BaseModal({ visible, title, children }) {
   return (
     <Modal visible={visible} animationType="slide">
-      <ScrollView style={styles.app} contentContainerStyle={styles.content}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {children}
-      </ScrollView>
+      <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -1981,6 +1997,7 @@ function statusStyle(status) {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: 118 },
+  modalContent: { padding: spacing.lg, paddingBottom: 220 },
   hero: { borderRadius: 28, padding: spacing.lg, marginBottom: spacing.lg },
   authHeaderClean: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.sm },
   authHero: { borderRadius: 30, padding: spacing.lg, marginBottom: spacing.lg, minHeight: 245, justifyContent: 'space-between' },
