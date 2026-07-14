@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -52,8 +52,9 @@ const emptyRoomForm = {
   fasilitas_meja: false,
   fasilitas_parkir: true,
   catatan: '',
-  foto: null,
-  existing_foto: '',
+  fotos: [],
+  existing_fotos: [],
+  hapus_foto_ids: [],
 };
 const emptyOccupantForm = {
   kamar_id: '',
@@ -159,6 +160,40 @@ export default function App() {
     const timer = setInterval(checkBillUpdates, 15000);
     return () => clearInterval(timer);
   }, [tokenValue, activeKosId, tab]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (imagePreview) {
+        setImagePreview(null);
+        return true;
+      }
+      if (modal) {
+        setModal(null);
+        setMultiPayContext(null);
+        setRoomForm(emptyRoomForm);
+        return true;
+      }
+      if (roomDetail) {
+        setRoomDetail(null);
+        return true;
+      }
+      if (occupantDetail) {
+        setOccupantDetail(null);
+        return true;
+      }
+      if (tab === 'lainnya' && moreScreen !== 'payment') {
+        setMoreScreen('payment');
+        return true;
+      }
+      if (tokenValue && tab !== 'dashboard') {
+        setTab('dashboard');
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [imagePreview, modal, roomDetail, occupantDetail, tab, moreScreen, tokenValue]);
 
   async function saveAuth(nextToken) {
     setTokenValue(nextToken);
@@ -313,8 +348,22 @@ export default function App() {
   }
 
   async function pickRoomImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    if (!result.canceled) setRoomForm((current) => ({ ...current, foto: result.assets[0] }));
+    const used = (roomForm.existing_fotos?.length || 0) + (roomForm.fotos?.length || 0);
+    const remaining = Math.max(0, 5 - used);
+    if (remaining <= 0) return Alert.alert('Foto sudah maksimal', 'Maksimal 5 foto untuk setiap kamar.');
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      quality: 0.45,
+      exif: false,
+    });
+    if (!result.canceled) {
+      setRoomForm((current) => ({
+        ...current,
+        fotos: [...(current.fotos || []), ...result.assets.slice(0, remaining)],
+      }));
+    }
   }
 
   async function pickKtpImage() {
@@ -345,13 +394,14 @@ export default function App() {
       form.append('kos_id', String(activeKosId));
       if (roomForm.id) form.append('_method', 'PUT');
       Object.entries(roomForm).forEach(([key, value]) => {
-        if (['id', 'foto', 'existing_foto'].includes(key) || value === null || value === '') return;
+        if (['id', 'fotos', 'existing_fotos', 'hapus_foto_ids'].includes(key) || value === null || value === '') return;
         const payloadValue = key === 'harga_bulanan' ? cleanNumber(value) : value;
         form.append(key, typeof payloadValue === 'boolean' ? (payloadValue ? '1' : '0') : String(payloadValue));
       });
-      if (roomForm.foto) {
-        form.append('foto', { uri: roomForm.foto.uri, name: roomForm.foto.fileName || 'kamar.jpg', type: roomForm.foto.mimeType || 'image/jpeg' });
-      }
+      (roomForm.fotos || []).forEach((photo, index) => {
+        form.append('fotos[]', { uri: photo.uri, name: photo.fileName || `kamar-${index + 1}.jpg`, type: photo.mimeType || 'image/jpeg' });
+      });
+      (roomForm.hapus_foto_ids || []).forEach((id) => form.append('hapus_foto_ids[]', String(id)));
       await api(roomForm.id ? `/kamar/${roomForm.id}` : '/kamar', { method: 'POST', body: form, isMultipart: true });
       setModal(null);
       setRoomForm(emptyRoomForm);
@@ -768,7 +818,9 @@ export default function App() {
 }
 
 function AuthScreen(props) {
-  const googleReady = Boolean(props.googleWebClientId && props.googleAndroidClientId);
+  const googleReady = Platform.OS === 'android'
+    ? Boolean(props.googleAndroidClientId)
+    : Boolean(props.googleWebClientId);
 
   return (
     <Shell>
@@ -817,7 +869,10 @@ function AuthScreen(props) {
 }
 
 function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
-  const [, response, promptGoogleLogin] = Google.useIdTokenAuthRequest({ webClientId, androidClientId });
+  const requestConfig = Platform.OS === 'android'
+    ? { androidClientId, ...(webClientId ? { webClientId } : {}) }
+    : { webClientId, ...(androidClientId ? { androidClientId } : {}) };
+  const [, response, promptGoogleLogin] = Google.useIdTokenAuthRequest(requestConfig);
 
   useEffect(() => {
     if (response?.type !== 'success') return;
@@ -1066,13 +1121,22 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
   const penghuni = room.penghuni_aktif;
   const canAdd = !penghuni && room.status === 'kosong';
   const labels = facilityLabels(room);
+  const photos = roomPhotos(room, apiBase);
   return (
     <Modal visible transparent animationType="slide">
       <View style={styles.modalOverlay}>
         <ScrollView style={styles.modalCard}>
           <Text style={styles.modalTitle}>Kamar {room.nomor_kamar}</Text>
           <Text style={styles.muted}>{room.tipe_kamar || '-'} - {money(room.harga_bulanan)} - {room.status}</Text>
-          {room.foto ? <Image source={{ uri: storageUrl(room.foto, apiBase) }} style={styles.proofImage} /> : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto kamar.</Text></View>}
+          {photos.length ? (
+            <View style={styles.roomPhotoGrid}>
+              {photos.map((photo, index) => (
+                <View key={photo.key || index} style={styles.roomPhotoItem}>
+                  <Image source={{ uri: photo.uri }} style={styles.roomPhotoThumb} />
+                </View>
+              ))}
+            </View>
+          ) : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto kamar.</Text></View>}
           <Text style={styles.sectionTitle}>Fasilitas</Text>
           {labels.length ? <View style={styles.facilityChipRow}>{labels.map((label) => <Text key={label} style={styles.facilityChip}>{label}</Text>)}</View> : <Text style={styles.muted}>Belum ada fasilitas dipilih.</Text>}
           <Text style={styles.sectionTitle}>Penghuni Aktif</Text>
@@ -1135,7 +1199,31 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onCheck
 
 function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClose, loading }) {
   const isEdit = Boolean(form.id);
-  const photoUri = form.foto?.uri || (form.existing_foto ? storageUrl(form.existing_foto, apiBase) : '');
+  const existingPhotos = (form.existing_fotos || []).map((photo, index) => ({
+    key: `existing-${photo.id || photo.path || index}`,
+    uri: photo.url || storageUrl(photo.path, apiBase),
+    id: photo.id,
+    existing: true,
+  }));
+  const newPhotos = (form.fotos || []).map((photo, index) => ({
+    key: `new-${photo.uri}-${index}`,
+    uri: photo.uri,
+    index,
+    existing: false,
+  }));
+  const photos = [...existingPhotos, ...newPhotos];
+  const canAddPhoto = photos.length < 5;
+  const removePhoto = (photo) => {
+    if (photo.existing) {
+      setForm({
+        ...form,
+        existing_fotos: (form.existing_fotos || []).filter((item) => item.id !== photo.id),
+        hapus_foto_ids: photo.id ? [...(form.hapus_foto_ids || []), photo.id] : form.hapus_foto_ids,
+      });
+      return;
+    }
+    setForm({ ...form, fotos: (form.fotos || []).filter((_, index) => index !== photo.index) });
+  };
   return (
     <BaseModal visible={visible} title={isEdit ? 'Edit Kamar' : 'Tambah Kamar'} onClose={onClose}>
       <Text style={styles.muted}>Isi data yang biasanya dilihat penghuni: nomor kamar, harga, status, foto, dan fasilitas.</Text>
@@ -1149,8 +1237,20 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
       {facilityRows.map(([key, label]) => <ToggleRow key={key} label={label} value={form[key]} onValueChange={(value) => setForm({ ...form, [key]: value })} />)}
       <FormField label="Catatan" value={form.catatan} onChangeText={(v) => setForm({ ...form, catatan: v })} multiline />
       <Text style={styles.label}>Foto kamar</Text>
-      {photoUri ? <Image source={{ uri: photoUri }} style={styles.preview} /> : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto dipilih.</Text></View>}
-      <SecondaryButton title={photoUri ? 'Ganti Foto Kamar' : 'Pilih Foto Kamar'} onPress={onPick} />
+      <Text style={styles.muted}>Maksimal 5 foto. Foto akan dikompresi agar aplikasi tetap ringan.</Text>
+      {photos.length ? (
+        <View style={styles.roomPhotoGrid}>
+          {photos.map((photo) => (
+            <View key={photo.key} style={styles.roomPhotoItem}>
+              <Image source={{ uri: photo.uri }} style={styles.roomPhotoThumb} />
+              <Pressable onPress={() => removePhoto(photo)} style={({ pressed }) => [styles.removePhotoButton, pressed && styles.pressed]}>
+                <Text style={styles.removePhotoText}>Hapus</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto dipilih.</Text></View>}
+      {canAddPhoto ? <SecondaryButton title={`Tambah Foto Kamar (${photos.length}/5)`} onPress={onPick} /> : <Text style={styles.muted}>Foto kamar sudah mencapai batas maksimal.</Text>}
       <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={isEdit ? 'Simpan Perubahan' : 'Simpan Kamar'} />
     </BaseModal>
   );
@@ -1501,8 +1601,13 @@ function roomToForm(room) {
     fasilitas_meja: isTruthy(room.fasilitas_meja),
     fasilitas_parkir: isTruthy(room.fasilitas_parkir),
     catatan: room.catatan || '',
-    foto: null,
-    existing_foto: room.foto || '',
+    fotos: [],
+    existing_fotos: (room.fotos || (room.foto ? [{ id: null, path: room.foto, url: room.foto_url }] : [])).map((photo) => ({
+      id: photo.id,
+      path: photo.path,
+      url: photo.url,
+    })),
+    hapus_foto_ids: [],
   };
 }
 const paymentOptionRows = [
@@ -1691,10 +1796,12 @@ function AnnouncementCard({ item, onToggle }) {
 
 function RoomCard({ room, onPress }) {
   const labels = facilityLabels(room);
+  const photo = roomPhotos(room)[0];
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.rowBetween}><Text style={styles.cardTitle}>Kamar {room.nomor_kamar}</Text><Text style={[styles.badge, statusStyle(room.status)]}>{room.status}</Text></View>
       <Text style={styles.muted}>{room.tipe_kamar || '-'} - {money(room.harga_bulanan)}</Text>
+      {photo ? <Image source={{ uri: photo.uri }} style={styles.roomCardImage} /> : null}
       {labels.length ? <View style={styles.facilityChipRow}>{labels.slice(0, 4).map((label) => <Text key={label} style={styles.facilityChipSmall}>{label}</Text>)}</View> : <Text style={styles.facilities}>Belum ada fasilitas dipilih</Text>}
       <Text style={styles.linkText}>Lihat detail kamar</Text>
     </Pressable>
@@ -1974,6 +2081,18 @@ function storageUrl(path, apiBase) {
   return `${root}/storage/${path}`;
 }
 
+function roomPhotos(room, apiBase = DEFAULT_API) {
+  const photos = Array.isArray(room?.fotos) ? room.fotos : [];
+  if (photos.length) {
+    return photos.map((photo, index) => ({
+      key: String(photo.id || photo.path || index),
+      uri: photo.url || storageUrl(photo.path, apiBase),
+    })).filter((photo) => photo.uri);
+  }
+  const uri = room?.foto_url || storageUrl(room?.foto, apiBase);
+  return uri ? [{ key: String(room?.foto || uri), uri }] : [];
+}
+
 function proofImageUrl(bill, apiBase) {
   if (bill.bukti_pembayaran) return storageUrl(bill.bukti_pembayaran, apiBase);
   if (bill.bukti_pembayaran_url) return storageUrl(bill.bukti_pembayaran_url.replace(/^https?:\/\/[^/]+\/storage\//, ''), apiBase);
@@ -2141,6 +2260,12 @@ const styles = StyleSheet.create({
   toggleLabel: { color: colors.text, fontWeight: '600' },
   preview: { height: 180, borderRadius: 20, marginBottom: spacing.md },
   proofImage: { height: 190, borderRadius: 18, marginTop: spacing.sm, marginBottom: spacing.md, backgroundColor: colors.surfaceAlt },
+  roomPhotoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.md },
+  roomPhotoItem: { width: '48%', position: 'relative' },
+  roomPhotoThumb: { width: '100%', aspectRatio: 1.25, borderRadius: 16, backgroundColor: colors.surfaceAlt },
+  roomCardImage: { width: '100%', height: 130, borderRadius: 16, marginTop: spacing.sm, marginBottom: spacing.sm, backgroundColor: colors.surfaceAlt },
+  removePhotoButton: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: colors.border },
+  removePhotoText: { color: colors.danger, fontWeight: '800', fontSize: 12 },
   imagePreviewOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', padding: spacing.md, justifyContent: 'center' },
   imagePreview: { width: '100%', height: '82%' },
   imagePreviewButton: { marginTop: spacing.md },

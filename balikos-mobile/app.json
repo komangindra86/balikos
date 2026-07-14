@@ -9,7 +9,7 @@
       "apiBase": "https://balikos.balisantih.com/api/balikos",
       "portalOrigin": "https://balikos.balisantih.com",
       "googleWebClientId": "",
-      "googleAndroidClientId": ""
+      "googleAndroidClientId": "990876078905-agc2ej3m4uo4humpb07tuk0355uf54i7.apps.googleusercontent.com"
     },
     "icon": "./assets/icon.png",
     "splash": {
@@ -22,7 +22,7 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#063a8f"

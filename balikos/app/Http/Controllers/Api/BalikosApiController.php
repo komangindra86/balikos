@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -272,7 +273,9 @@ class BalikosApiController extends Controller
         $query = DB::table('kamars')->whereIn('kos_id', $this->ownedKosIds($request));
         $this->applyKosFilter($request, $query);
 
-        return response()->json(['data' => $query->orderBy('kos_id')->orderBy('nomor_kamar')->get()]);
+        $rows = $query->orderBy('kos_id')->orderBy('nomor_kamar')->get();
+
+        return response()->json(['data' => $this->roomsWithPhotos($rows)]);
     }
 
     public function kamarStore(Request $request)
@@ -280,13 +283,15 @@ class BalikosApiController extends Controller
         $data = $request->validate($this->kamarRules());
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
         $data = $this->booleanize($data, $this->facilityFields());
-        $data['foto'] = $this->storeUpload($request, 'foto', 'balikos/kamar');
+        unset($data['fotos'], $data['hapus_foto_ids']);
         $data['created_at'] = now();
         $data['updated_at'] = now();
 
         $id = DB::table('kamars')->insertGetId($data);
+        $this->storeRoomPhotos($request, $id);
+        $this->syncPrimaryRoomPhoto($id);
 
-        return response()->json(['message' => 'Kamar berhasil dibuat.', 'data' => $this->ownedRow($request, 'kamars', $id)], 201);
+        return response()->json(['message' => 'Kamar berhasil dibuat.', 'data' => $this->roomWithPhotos($this->ownedRow($request, 'kamars', $id))], 201);
     }
 
     public function kamarShow(Request $request, int $id)
@@ -299,6 +304,7 @@ class BalikosApiController extends Controller
             ->select('id', 'nama_lengkap', 'no_wa', 'pekerjaan', 'tanggal_masuk', 'status')
             ->first();
 
+        $kamar = $this->roomWithPhotos($kamar);
         $kamar->penghuni_aktif = $penghuni;
 
         return response()->json(['data' => $kamar]);
@@ -312,14 +318,26 @@ class BalikosApiController extends Controller
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
         $data = $this->booleanize($data, $this->facilityFields());
 
-        if ($request->hasFile('foto')) {
-            $data['foto'] = $this->storeUpload($request, 'foto', 'balikos/kamar');
+        $deletedPhotoIds = collect($data['hapus_foto_ids'] ?? [])->map(fn ($value) => (int) $value)->filter()->values();
+        unset($data['fotos'], $data['hapus_foto_ids']);
+
+        if ($deletedPhotoIds->isNotEmpty()) {
+            $deleted = DB::table('kamar_fotos')
+                ->where('kamar_id', $id)
+                ->whereIn('id', $deletedPhotoIds)
+                ->get();
+            foreach ($deleted as $photo) {
+                Storage::disk('public')->delete($photo->path);
+            }
+            DB::table('kamar_fotos')->whereIn('id', $deleted->pluck('id'))->delete();
         }
 
         $data['updated_at'] = now();
         DB::table('kamars')->where('id', $id)->update($data);
+        $this->storeRoomPhotos($request, $id);
+        $this->syncPrimaryRoomPhoto($id);
 
-        return response()->json(['message' => 'Kamar berhasil diperbarui.', 'data' => $this->ownedRow($request, 'kamars', $id)]);
+        return response()->json(['message' => 'Kamar berhasil diperbarui.', 'data' => $this->roomWithPhotos($this->ownedRow($request, 'kamars', $id))]);
     }
 
     public function kamarDelete(Request $request, int $id)
@@ -1041,6 +1059,96 @@ class BalikosApiController extends Controller
         return $request->file($field)->store($directory, 'public');
     }
 
+    private function storeRoomPhotos(Request $request, int $kamarId): void
+    {
+        $files = [];
+        if ($request->hasFile('foto')) {
+            $files[] = $request->file('foto');
+        }
+        if ($request->hasFile('fotos')) {
+            foreach ((array) $request->file('fotos') as $file) {
+                $files[] = $file;
+            }
+        }
+
+        if (! $files) {
+            return;
+        }
+
+        $currentCount = DB::table('kamar_fotos')->where('kamar_id', $kamarId)->count();
+        $nextOrder = (int) DB::table('kamar_fotos')->where('kamar_id', $kamarId)->max('urutan');
+        foreach (array_slice($files, 0, max(0, 5 - $currentCount)) as $file) {
+            DB::table('kamar_fotos')->insert([
+                'kamar_id' => $kamarId,
+                'path' => $file->store('balikos/kamar', 'public'),
+                'urutan' => ++$nextOrder,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+    }
+
+    private function syncPrimaryRoomPhoto(int $kamarId): void
+    {
+        $photo = DB::table('kamar_fotos')
+            ->where('kamar_id', $kamarId)
+            ->orderBy('urutan')
+            ->orderBy('id')
+            ->first();
+
+        DB::table('kamars')->where('id', $kamarId)->update([
+            'foto' => $photo ? $photo->path : null,
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function roomsWithPhotos($rows)
+    {
+        $roomIds = $rows->pluck('id');
+        $photos = DB::table('kamar_fotos')
+            ->whereIn('kamar_id', $roomIds)
+            ->orderBy('urutan')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('kamar_id');
+
+        return $rows->map(function ($row) use ($photos) {
+            return $this->roomWithPhotos($row, $photos->get($row->id, collect()));
+        });
+    }
+
+    private function roomWithPhotos($row, $photos = null)
+    {
+        if (! $row) {
+            return $row;
+        }
+
+        $photos ??= DB::table('kamar_fotos')
+            ->where('kamar_id', $row->id)
+            ->orderBy('urutan')
+            ->orderBy('id')
+            ->get();
+
+        if ($photos->isEmpty() && ! empty($row->foto)) {
+            $photos = collect([(object) [
+                'id' => null,
+                'kamar_id' => $row->id,
+                'path' => $row->foto,
+                'urutan' => 1,
+            ]]);
+        }
+
+        $row->fotos = $photos->map(fn ($photo) => [
+            'id' => $photo->id,
+            'path' => $photo->path,
+            'url' => asset('storage/'.$photo->path),
+            'urutan' => (int) $photo->urutan,
+        ])->values();
+        $row->foto_url = $row->foto ? asset('storage/'.$row->foto) : null;
+
+        return $row;
+    }
+
     private function billsWithUrls($rows)
     {
         return $rows->map(fn ($row) => $this->billWithUrls($row));
@@ -1111,6 +1219,10 @@ class BalikosApiController extends Controller
             'fasilitas_meja' => ['sometimes', 'boolean'],
             'fasilitas_parkir' => ['sometimes', 'boolean'],
             'foto' => ['nullable', 'image', 'max:2048'],
+            'fotos' => ['nullable', 'array', 'max:5'],
+            'fotos.*' => ['image', 'max:2048'],
+            'hapus_foto_ids' => ['nullable', 'array'],
+            'hapus_foto_ids.*' => ['integer'],
             'catatan' => ['nullable', 'string'],
         ];
     }
@@ -1160,7 +1272,7 @@ class BalikosApiController extends Controller
 
     private function normalizePaymentMethod(array $data, Request $request, ?object $existing = null): array
     {
-        $jenis = $data['jenis'] ?? $existing?->jenis;
+        $jenis = $data['jenis'] ?? ($existing ? $existing->jenis : null);
         if ($jenis === 'qris') {
             $data['verification_mode'] = 'automatic';
             $data['gateway_provider'] = 'xendit';
@@ -1247,7 +1359,7 @@ class BalikosApiController extends Controller
 
         try {
             Http::timeout(5)->post('https://exp.host/--/api/v2/push/send', $messages);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
             // Push failure must not block payment proof submission.
         }
     }

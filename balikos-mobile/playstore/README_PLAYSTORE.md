@@ -7,7 +7,7 @@ Folder ini berisi teks dan checklist yang bisa dipakai saat membuat listing apli
 - App name: BALIKOS
 - Package name: `id.balisantih.balikos`
 - Version: `1.0.0`
-- Android versionCode: `3`
+- Android versionCode: `4`
 - Kategori: Business
 - Default language: Indonesian (id-ID)
 - App icon: `assets/playstore-icon.png` (512x512)
@@ -42,7 +42,7 @@ Setelah build selesai, unduh `.aab` dari link EAS dan upload ke Play Console.
 
 ## Yang Masih Perlu Diisi Manual
 
-- Google OAuth Android Client ID dan Web Client ID di `app.json`.
+- Google OAuth Android Client ID sudah diisi di `app.json`; Web Client ID bisa ditambahkan nanti jika diperlukan untuk platform lain.
 - SHA-1 production dari EAS/Play App Signing.
 - Email dukungan resmi untuk Play Console.
 - Nomor telepon/website developer jika diminta Play Console.

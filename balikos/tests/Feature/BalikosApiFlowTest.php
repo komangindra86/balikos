@@ -133,6 +133,46 @@ class BalikosApiFlowTest extends TestCase
         ])->assertOk()->assertJsonPath('data.status', 'kosong');
     }
 
+    public function test_owner_can_upload_multiple_room_photos(): void
+    {
+        Storage::fake('public');
+
+        $login = $this->postJson('/api/balikos/login', [
+            'email' => 'pemilik@balikos.test',
+            'password' => 'password',
+            'device_name' => 'feature-test',
+        ])->assertOk()->json();
+
+        $token = $login['token'];
+        $kosId = DB::table('kos')->where('owner_id', $login['user']['id'])->value('id');
+
+        $room = $this->withToken($token)->post('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'FOTO-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Foto Test',
+            'harga_bulanan' => 1500000,
+            'status' => 'kosong',
+            'fotos' => [
+                $this->fakePngUpload('kamar-1.png'),
+                $this->fakePngUpload('kamar-2.png'),
+            ],
+        ])->assertCreated()
+            ->assertJsonCount(2, 'data.fotos')
+            ->json('data');
+
+        $this->assertSame(2, DB::table('kamar_fotos')->where('kamar_id', $room['id'])->count());
+        $this->assertSame($room['fotos'][0]['path'], DB::table('kamars')->where('id', $room['id'])->value('foto'));
+        Storage::disk('public')->assertExists($room['fotos'][0]['path']);
+        Storage::disk('public')->assertExists($room['fotos'][1]['path']);
+
+        $this->withToken($token)->post('/api/balikos/kamar/'.$room['id'], [
+            '_method' => 'PUT',
+            'hapus_foto_ids' => [$room['fotos'][0]['id']],
+        ])->assertOk()->assertJsonCount(1, 'data.fotos');
+
+        $this->assertSame(1, DB::table('kamar_fotos')->where('kamar_id', $room['id'])->count());
+    }
+
     public function test_owner_can_use_payment_finance_and_announcement_menus(): void
     {
         $login = $this->postJson('/api/balikos/login', [
