@@ -885,7 +885,14 @@ function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
     onToken(idToken);
   }, [response]);
 
-  return <SecondaryButton title="Masuk dengan Google" onPress={() => promptGoogleLogin()} style={styles.googleButton} />;
+  return (
+    <Pressable onPress={() => promptGoogleLogin()} style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}>
+      <View style={styles.googleIcon}>
+        <Text style={styles.googleIconText}>G</Text>
+      </View>
+      <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
+    </Pressable>
+  );
 }
 
 function KosSetup({ form, setForm, saveKos, logout, loading }) {
@@ -2154,7 +2161,10 @@ const styles = StyleSheet.create({
   helperText: { color: colors.muted, lineHeight: 20, fontSize: 12, marginTop: spacing.sm },
   lockedInfo: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
   lockedTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: 4 },
-  googleButton: { backgroundColor: colors.surface, marginBottom: spacing.md },
+  googleButton: { minHeight: 54, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  googleIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  googleIconText: { color: '#4285f4', fontSize: 18, fontWeight: '900' },
+  googleButtonText: { color: colors.goldLight, fontSize: 16, fontWeight: '800' },
   authDivider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
   dividerText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
