@@ -17,6 +17,7 @@ const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://balikos.bal
 const DEFAULT_PORTAL_ORIGIN = Constants.expoConfig?.extra?.portalOrigin || 'https://balikos.balisantih.com';
 const GOOGLE_ANDROID_CLIENT_ID = '990876078905-agc2ej3m4uo4humpb07tuk0355uf54i7.apps.googleusercontent.com';
 const balikosLogo = require('./assets/logo-balikos.png');
+const googleLogo = require('./assets/google-icon.png');
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -887,9 +888,7 @@ function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
 
   return (
     <Pressable onPress={() => promptGoogleLogin()} style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}>
-      <View style={styles.googleIcon}>
-        <Text style={styles.googleIconText}>G</Text>
-      </View>
+      <Image source={googleLogo} style={styles.googleIcon} resizeMode="contain" />
       <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
     </Pressable>
   );
@@ -2162,8 +2161,7 @@ const styles = StyleSheet.create({
   lockedInfo: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
   lockedTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: 4 },
   googleButton: { minHeight: 54, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
-  googleIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  googleIconText: { color: '#4285f4', fontSize: 18, fontWeight: '900' },
+  googleIcon: { width: 26, height: 26 },
   googleButtonText: { color: colors.goldLight, fontSize: 16, fontWeight: '800' },
   authDivider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
