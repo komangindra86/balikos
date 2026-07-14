@@ -15,6 +15,7 @@ import { PrimaryButton, SecondaryButton } from './src/components/Buttons';
 
 const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://balikos.balisantih.com/api/balikos';
 const DEFAULT_PORTAL_ORIGIN = Constants.expoConfig?.extra?.portalOrigin || 'https://balikos.balisantih.com';
+const GOOGLE_ANDROID_CLIENT_ID = '990876078905-agc2ej3m4uo4humpb07tuk0355uf54i7.apps.googleusercontent.com';
 const balikosLogo = require('./assets/logo-balikos.png');
 
 WebBrowser.maybeCompleteAuthSession();
@@ -117,8 +118,8 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [periodDraft, setPeriodDraft] = useState({ bulan: thisMonth(), tahun: thisYear() });
   const waitingVerificationRef = useRef(null);
-  const googleWebClientId = Constants.expoConfig?.extra?.googleWebClientId || '';
-  const googleAndroidClientId = Constants.expoConfig?.extra?.googleAndroidClientId || '';
+  const googleWebClientId = Constants.expoConfig?.extra?.googleWebClientId || Constants.manifest?.extra?.googleWebClientId || '';
+  const googleAndroidClientId = Constants.expoConfig?.extra?.googleAndroidClientId || Constants.manifest?.extra?.googleAndroidClientId || GOOGLE_ANDROID_CLIENT_ID;
 
   const activeKos = useMemo(() => kosList.find((item) => item.id === activeKosId), [kosList, activeKosId]);
   const emptyRooms = useMemo(() => rooms.filter((room) => room.status === 'kosong'), [rooms]);
