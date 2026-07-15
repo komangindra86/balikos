@@ -11,6 +11,8 @@ set "ANDROID_SDK=C:\Users\Indra\AppData\Local\Android\Sdk"
 set "ADB=%ANDROID_SDK%\platform-tools\adb.exe"
 set "EMULATOR=%ANDROID_SDK%\emulator\emulator.exe"
 set "AVD_NAME=Pixel_3a_API_33_x86_64"
+set "NODE_HOME=C:\Program Files\nodejs"
+set "PATH=%NODE_HOME%;%PATH%"
 
 echo.
 echo ========================================
@@ -65,6 +67,21 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set "NODE_MAJOR=%%v"
+if %NODE_MAJOR% LSS 20 (
+    echo ERROR: Node.js yang aktif masih terlalu lama.
+    echo Versi aktif:
+    node -v
+    echo.
+    echo Install atau aktifkan Node.js 20/22 LTS, lalu jalankan ulang.
+    pause
+    exit /b 1
+)
+
+echo Node.js aktif:
+where node
+node -v
 
 where npm >nul 2>nul
 if errorlevel 1 (
