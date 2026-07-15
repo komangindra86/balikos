@@ -1130,15 +1130,17 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
 
 function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChangeStatus, onCheckout }) {
   const [hiddenPhotoKeys, setHiddenPhotoKeys] = useState([]);
+  const allPhotos = room ? roomPhotos(room, apiBase) : [];
+  const photoSignature = allPhotos.map((photo) => photo.key).join('|');
   useEffect(() => {
     setHiddenPhotoKeys([]);
-  }, [room?.id]);
+  }, [room?.id, photoSignature]);
 
   if (!room) return null;
   const penghuni = room.penghuni_aktif;
   const canAdd = !penghuni && room.status === 'kosong';
   const labels = facilityLabels(room);
-  const photos = roomPhotos(room, apiBase).filter((photo) => !hiddenPhotoKeys.includes(photo.key));
+  const photos = allPhotos.filter((photo) => !hiddenPhotoKeys.includes(photo.key));
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -1681,6 +1683,11 @@ function RoomPhotoImage({ photo, showError = false, onFail }) {
   const [displayUri, setDisplayUri] = useState(null);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
   const uri = sources[sourceIndex];
+  const sourceSignature = sources.join('|');
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [sourceSignature]);
 
   useEffect(() => {
     let alive = true;
