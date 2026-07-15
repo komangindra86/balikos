@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
@@ -16,7 +18,9 @@ import { PrimaryButton, SecondaryButton } from './src/components/Buttons';
 
 const DEFAULT_API = Constants.expoConfig?.extra?.apiBase || 'https://balikos.balisantih.com/api/balikos';
 const DEFAULT_PORTAL_ORIGIN = Constants.expoConfig?.extra?.portalOrigin || 'https://balikos.balisantih.com';
+const APP_SCHEME = 'id.balisantih.balikos';
 const GOOGLE_ANDROID_CLIENT_ID = '990876078905-agc2ej3m4uo4humpb07tuk0355uf54i7.apps.googleusercontent.com';
+const MAX_ROOM_PHOTO_UPLOAD_BYTES = 1800 * 1024;
 const balikosLogo = require('./assets/logo-balikos.png');
 const googleLogo = require('./assets/google-icon.png');
 
@@ -89,6 +93,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [register, setRegister] = useState({ name: '', email: '', phone: '', password: '', password_confirmation: '' });
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState('dashboard');
   const [moreScreen, setMoreScreen] = useState('payment');
   const [kosList, setKosList] = useState([]);
@@ -281,7 +286,9 @@ export default function App() {
 
   async function loadRooms() {
     const response = await api(`/kamar?kos_id=${activeKosId}`);
-    setRooms(response.data || []);
+    const nextRooms = response.data || [];
+    setRooms(nextRooms);
+    prefetchRoomPhotos(nextRooms, apiBase);
   }
 
   async function loadOccupants() {
@@ -332,6 +339,23 @@ export default function App() {
     }
   }
 
+  async function refreshActiveScreen() {
+    if (!tokenValue) return;
+    setRefreshing(true);
+    try {
+      await loadKos();
+      if (!activeKosId) return;
+      if (tab === 'dashboard') await loadDashboard();
+      if (tab === 'kamar') await loadRooms();
+      if (tab === 'penghuni') await loadOccupantWorkspace();
+      if (tab === 'lainnya') await loadMore();
+    } catch (error) {
+      Alert.alert('Gagal refresh', error.message || 'Data belum bisa dimuat ulang.');
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   async function openRoomDetail(id) {
     await submit(async () => {
       const response = await api(`/kamar/${id}`);
@@ -364,11 +388,21 @@ export default function App() {
       exif: false,
     });
     if (!result.canceled) {
-      const selected = (result.assets || []).slice(0, remaining);
-      setRoomForm((current) => ({
-        ...current,
-        fotos: [...(current.fotos || []), ...selected].slice(0, 5),
-      }));
+      setLoading(true);
+      try {
+        const selected = [];
+        for (const [index, asset] of (result.assets || []).slice(0, remaining).entries()) {
+          selected.push(await prepareRoomPhotoForUpload(asset, index));
+        }
+        setRoomForm((current) => ({
+          ...current,
+          fotos: [...(current.fotos || []), ...selected].slice(0, 5),
+        }));
+      } catch (error) {
+        Alert.alert('Foto belum bisa dipakai', error.message || 'Pilih foto lain dengan ukuran lebih kecil.');
+      } finally {
+        setLoading(false);
+      }
     }
   }
 
@@ -405,6 +439,9 @@ export default function App() {
         form.append(key, typeof payloadValue === 'boolean' ? (payloadValue ? '1' : '0') : String(payloadValue));
       });
       (roomForm.fotos || []).forEach((photo, index) => {
+        if (photo.fileSize && photo.fileSize > MAX_ROOM_PHOTO_UPLOAD_BYTES) {
+          throw new Error(`Foto ${index + 1} terlalu besar. Hapus foto itu lalu pilih ulang agar aplikasi mengompresi otomatis.`);
+        }
         const payload = { uri: photo.uri, name: photo.fileName || `kamar-${index + 1}.jpg`, type: photo.mimeType || 'image/jpeg' };
         if (index === 0) form.append('foto', payload);
         else form.append('fotos[]', payload);
@@ -798,10 +835,21 @@ export default function App() {
           </View>
         </View>
       </LinearGradient>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshActiveScreen}
+            colors={[colors.gold]}
+            tintColor={colors.gold}
+            progressBackgroundColor={colors.surface}
+          />
+        )}
+      >
         <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={setActiveKosId} onAdd={() => setModal('kos')} />
         {tab === 'dashboard' && <Dashboard data={dashboard} activeKos={activeKos} setTab={setTab} />}
-        {tab === 'kamar' && <RoomsScreen rooms={rooms} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
+        {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
         {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
       </ScrollView>
@@ -877,13 +925,26 @@ function AuthScreen(props) {
 }
 
 function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
+  const googleRedirectUri = AuthSession.makeRedirectUri({
+    native: `${APP_SCHEME}:/oauthredirect`,
+    scheme: APP_SCHEME,
+    path: 'oauthredirect',
+  });
   const requestConfig = Platform.OS === 'android'
-    ? { androidClientId, ...(webClientId ? { webClientId } : {}) }
-    : { webClientId, ...(androidClientId ? { androidClientId } : {}) };
-  const [, response, promptGoogleLogin] = Google.useIdTokenAuthRequest(requestConfig);
+    ? { androidClientId, redirectUri: googleRedirectUri, ...(webClientId ? { webClientId } : {}) }
+    : { webClientId, redirectUri: googleRedirectUri, ...(androidClientId ? { androidClientId } : {}) };
+  const [googleRequest, response, promptGoogleLogin] = Google.useIdTokenAuthRequest(requestConfig);
 
   useEffect(() => {
-    if (response?.type !== 'success') return;
+    if (!response) return;
+    if (response.type === 'dismiss' || response.type === 'cancel') {
+      return;
+    }
+    if (response.type === 'error') {
+      Alert.alert('Login Google gagal', response.error?.message || 'Google belum bisa mengembalikan login ke aplikasi BALIKOS.');
+      return;
+    }
+    if (response.type !== 'success') return;
     const idToken = response.params?.id_token;
     if (!idToken) {
       Alert.alert('Login Google gagal', 'Token Google tidak diterima. Silakan coba lagi.');
@@ -893,7 +954,7 @@ function GoogleLoginButton({ webClientId, androidClientId, onToken }) {
   }, [response]);
 
   return (
-    <Pressable onPress={() => promptGoogleLogin()} style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}>
+    <Pressable disabled={!googleRequest} onPress={() => promptGoogleLogin()} style={({ pressed }) => [styles.googleButton, pressed && styles.pressed, !googleRequest && styles.disabledButton]}>
       <Image source={googleLogo} style={styles.googleIcon} resizeMode="contain" />
       <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
     </Pressable>
@@ -936,7 +997,7 @@ function KosFormModal({ visible, form, setForm, onSave, onClose, loading }) {
   );
 }
 
-function RoomsScreen({ rooms, openRoomDetail, openRoomModal }) {
+function RoomsScreen({ rooms, apiBase, openRoomDetail, openRoomModal }) {
   const [search, setSearch] = useState('');
   const keyword = search.trim().toLowerCase();
   const emptyCount = rooms.filter((room) => room.status === 'kosong').length;
@@ -963,7 +1024,7 @@ function RoomsScreen({ rooms, openRoomDetail, openRoomModal }) {
       </View>
       <FormField label="Cari kamar" value={search} onChangeText={setSearch} placeholder="Nomor, tipe, status, fasilitas" />
       <Notice text="Klik kartu kamar untuk melihat detail, mengedit fasilitas/foto, mengubah status, atau menambah penghuni." />
-      {filteredRooms.map((room) => <RoomCard key={room.id} room={room} onPress={() => openRoomDetail(room.id)} />)}
+      {filteredRooms.map((room) => <RoomCard key={room.id} room={room} apiBase={apiBase} onPress={() => openRoomDetail(room.id)} />)}
       {rooms.length === 0 ? <Empty text="Belum ada kamar." /> : null}
       {rooms.length > 0 && filteredRooms.length === 0 ? <Empty text="Tidak ada kamar yang cocok dengan pencarian." /> : null}
     </>
@@ -1145,7 +1206,11 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <ScrollView style={styles.modalCard}>
+        <ScrollView
+          style={styles.modalCard}
+          contentContainerStyle={styles.modalCardContent}
+          scrollIndicatorInsets={{ bottom: 120 }}
+        >
           <Text style={styles.modalTitle}>Kamar {room.nomor_kamar}</Text>
           <Text style={styles.muted}>{room.tipe_kamar || '-'} - {money(room.harga_bulanan)} - {room.status}</Text>
           {photos.length ? (
@@ -1179,7 +1244,11 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onCheck
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <ScrollView style={styles.modalCard}>
+        <ScrollView
+          style={styles.modalCard}
+          contentContainerStyle={styles.modalCardContent}
+          scrollIndicatorInsets={{ bottom: 120 }}
+        >
           <Text style={styles.modalTitle}>{occupant.nama_lengkap}</Text>
           <Text style={styles.muted}>Kamar {roomName(rooms, occupant.kamar_id)} - Status {occupant.status}</Text>
           <Text style={styles.sectionTitle}>Pembayaran</Text>
@@ -1660,6 +1729,7 @@ function BaseModal({ visible, title, children, onClose }) {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           contentContainerStyle={styles.modalContent}
+          scrollIndicatorInsets={{ bottom: 120 }}
         >
           <Text style={styles.sectionTitle}>{title}</Text>
           {children}
@@ -1678,7 +1748,7 @@ function FooterButtons({ onClose, onSave, loading, saveTitle = 'Simpan' }) {
   );
 }
 
-function RoomPhotoImage({ photo, showError = false, onFail }) {
+function RoomPhotoImage({ photo, showError = false, onFail, style }) {
   const sources = photo.sources?.length ? photo.sources : [photo.uri].filter(Boolean);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [displayUri, setDisplayUri] = useState(null);
@@ -1702,15 +1772,9 @@ function RoomPhotoImage({ photo, showError = false, onFail }) {
     }
 
     setLoadingPhoto(true);
-    const extension = uri.split('?')[0].split('.').pop()?.toLowerCase();
-    const safeExtension = ['jpg', 'jpeg', 'png', 'webp'].includes(extension) ? extension : 'jpg';
-    const cacheKey = uri.replace(/[^a-z0-9]/gi, '_').slice(-120);
-    const cacheUri = `${FileSystem.cacheDirectory}balikos-room-${cacheKey}.${safeExtension}`;
-
-    FileSystem.downloadAsync(uri, cacheUri, { headers: { Accept: 'image/*' } })
-      .then((download) => {
-        if (download.status < 200 || download.status >= 300) throw new Error(`HTTP ${download.status}`);
-        if (alive) setDisplayUri(download.uri);
+    cachedRoomPhotoUri(uri)
+      .then((cachedUri) => {
+        if (alive) setDisplayUri(cachedUri);
       })
       .catch((error) => {
         console.warn('Room photo download failed', uri, error?.message || error);
@@ -1729,22 +1793,19 @@ function RoomPhotoImage({ photo, showError = false, onFail }) {
   }, [uri]);
 
   if (!uri || sourceIndex >= sources.length) {
-    return showError ? <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View> : null;
+    return showError ? <View style={[styles.roomPhotoThumb, style, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View> : null;
   }
 
   if (loadingPhoto || !displayUri) {
-    return <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Memuat foto...</Text></View>;
+    return <View style={[styles.roomPhotoThumb, style, styles.photoError]}><Text style={styles.photoErrorText}>Memuat foto...</Text></View>;
   }
 
   return (
     <Image
       source={{ uri: displayUri }}
-      style={styles.roomPhotoThumb}
+      style={[styles.roomPhotoThumb, style]}
       resizeMode="cover"
       fadeDuration={0}
-      onLoad={(event) => {
-        console.log('Room photo loaded', uri, event?.nativeEvent?.source);
-      }}
       onError={(event) => {
         console.warn('Room photo failed', uri, event?.nativeEvent?.error);
         if (sourceIndex >= sources.length - 1) onFail?.();
@@ -1892,14 +1953,14 @@ function AnnouncementCard({ item, onToggle }) {
   );
 }
 
-function RoomCard({ room, onPress }) {
+function RoomCard({ room, apiBase, onPress }) {
   const labels = facilityLabels(room);
-  const photo = roomPhotos(room)[0];
+  const photo = roomPhotos(room, apiBase)[0];
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.rowBetween}><Text style={styles.cardTitle}>Kamar {room.nomor_kamar}</Text><Text style={[styles.badge, statusStyle(room.status)]}>{room.status}</Text></View>
       <Text style={styles.muted}>{room.tipe_kamar || '-'} - {money(room.harga_bulanan)}</Text>
-      {photo ? <Image source={{ uri: photo.uri }} style={styles.roomCardImage} /> : null}
+      {photo ? <RoomPhotoImage photo={photo} style={styles.roomCardImage} /> : null}
       {labels.length ? <View style={styles.facilityChipRow}>{labels.slice(0, 4).map((label) => <Text key={label} style={styles.facilityChipSmall}>{label}</Text>)}</View> : <Text style={styles.facilities}>Belum ada fasilitas dipilih</Text>}
       <Text style={styles.linkText}>Lihat detail kamar</Text>
     </Pressable>
@@ -2172,6 +2233,74 @@ function roomName(rooms, id) {
   return rooms.find((room) => Number(room.id) === Number(id))?.nomor_kamar || id || '-';
 }
 
+function roomPhotoCacheUri(uri) {
+  const extension = uri.split('?')[0].split('.').pop()?.toLowerCase();
+  const safeExtension = ['jpg', 'jpeg', 'png', 'webp'].includes(extension) ? extension : 'jpg';
+  const cacheKey = uri.replace(/[^a-z0-9]/gi, '_').slice(-120);
+  return `${FileSystem.cacheDirectory}balikos-room-${cacheKey}.${safeExtension}`;
+}
+
+async function cachedRoomPhotoUri(uri) {
+  const cacheUri = roomPhotoCacheUri(uri);
+  const cached = await FileSystem.getInfoAsync(cacheUri);
+  if (cached.exists) return cacheUri;
+
+  const download = await FileSystem.downloadAsync(uri, cacheUri, { headers: { Accept: 'image/*' } });
+  if (download.status < 200 || download.status >= 300) throw new Error(`HTTP ${download.status}`);
+  return download.uri;
+}
+
+async function prepareRoomPhotoForUpload(asset, index = 0) {
+  const attempt = async (maxSide, compress) => {
+    const width = Number(asset.width || 0);
+    const height = Number(asset.height || 0);
+    const largestSide = Math.max(width, height);
+    const actions = largestSide > maxSide
+      ? [{ resize: width >= height ? { width: maxSide } : { height: maxSide } }]
+      : [];
+    const result = await ImageManipulator.manipulateAsync(asset.uri, actions, {
+      compress,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    const info = await FileSystem.getInfoAsync(result.uri, { size: true });
+    return { ...result, fileSize: info.size || 0 };
+  };
+
+  try {
+    let photo = await attempt(1280, 0.72);
+    if (photo.fileSize > MAX_ROOM_PHOTO_UPLOAD_BYTES) {
+      photo = await attempt(1024, 0.58);
+    }
+    if (photo.fileSize > MAX_ROOM_PHOTO_UPLOAD_BYTES) {
+      photo = await attempt(900, 0.5);
+    }
+    if (photo.fileSize > MAX_ROOM_PHOTO_UPLOAD_BYTES) {
+      throw new Error(`Foto ${index + 1} masih terlalu besar setelah dikompresi. Pilih foto lain yang lebih ringan.`);
+    }
+
+    return {
+      ...asset,
+      uri: photo.uri,
+      width: photo.width,
+      height: photo.height,
+      fileSize: photo.fileSize,
+      fileName: `kamar-${Date.now()}-${index + 1}.jpg`,
+      mimeType: 'image/jpeg',
+    };
+  } catch (error) {
+    throw new Error(error.message || `Foto ${index + 1} gagal diproses.`);
+  }
+}
+
+function prefetchRoomPhotos(rooms, apiBase) {
+  const sources = (rooms || [])
+    .flatMap((room) => roomPhotos(room, apiBase).map((photo) => (photo.sources || [photo.uri]).find(Boolean)))
+    .filter((uri) => /^https?:\/\//.test(uri));
+  [...new Set(sources)].slice(0, 12).forEach((uri) => {
+    cachedRoomPhotoUri(uri).catch(() => {});
+  });
+}
+
 function storageUrl(path, apiBase) {
   if (!path) return '';
   const apiRoot = (apiBase || DEFAULT_API).replace(/\/$/, '');
@@ -2231,7 +2360,7 @@ function statusStyle(status) {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: 118 },
-  modalContent: { padding: spacing.lg, paddingBottom: 220 },
+  modalContent: { padding: spacing.lg, paddingBottom: 320 },
   hero: { borderRadius: 28, padding: spacing.lg, marginBottom: spacing.lg },
   authHeaderClean: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.sm },
   authHero: { borderRadius: 30, padding: spacing.lg, marginBottom: spacing.lg, minHeight: 245, justifyContent: 'space-between' },
@@ -2271,6 +2400,7 @@ const styles = StyleSheet.create({
   googleButton: { minHeight: 54, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   googleIcon: { width: 26, height: 26 },
   googleButtonText: { color: colors.goldLight, fontSize: 16, fontWeight: '800' },
+  disabledButton: { opacity: 0.55 },
   authDivider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
   dividerText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
@@ -2371,7 +2501,8 @@ const styles = StyleSheet.create({
   smallButton: { minHeight: 42, paddingHorizontal: spacing.md },
   cardButton: { minHeight: 42, marginTop: spacing.md },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalCard: { maxHeight: '88%', backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: spacing.lg },
+  modalCard: { maxHeight: '88%', backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  modalCardContent: { padding: spacing.lg, paddingBottom: 320 },
   modalTitle: { color: colors.text, fontSize: 25, fontWeight: '800' },
   toggleRow: { minHeight: 52, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
   toggleLabel: { color: colors.text, fontWeight: '600' },

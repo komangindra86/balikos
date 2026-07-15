@@ -41,6 +41,11 @@
                         @endif
                     </a>
                 @endif
+                <div class="mt-3 border-t border-slate-100 pt-3">
+                    <div class="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Legal</div>
+                    <a class="block rounded-md px-3 py-2 font-medium text-slate-700 hover:bg-slate-100" href="{{ route('privacy-policy') }}" target="_blank" rel="noopener">Kebijakan Privasi</a>
+                    <a class="block rounded-md px-3 py-2 font-medium text-slate-700 hover:bg-slate-100" href="{{ route('account-deletion') }}" target="_blank" rel="noopener">Penghapusan Akun/Data</a>
+                </div>
             </nav>
         </aside>
 

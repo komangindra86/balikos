@@ -6,3 +6,6 @@ Rilis awal BALIKOS.
 - Bagikan portal penghuni untuk melihat tagihan dan upload bukti pembayaran.
 - Kelola metode pembayaran transfer bank dan QRIS.
 - Pantau laporan keuangan kos.
+- Perbaikan login Google agar kembali ke aplikasi BALIKOS.
+- Perbaikan tampilan foto kamar, tombol modal, dan refresh data.
+- Perbaikan upload foto kamar agar foto besar dikompresi sebelum dikirim.

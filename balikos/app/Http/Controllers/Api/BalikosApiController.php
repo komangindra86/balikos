@@ -110,6 +110,15 @@ class BalikosApiController extends Controller
         }
 
         $profile = $google->json();
+        $allowedAudiences = collect([
+            config('services.google.android_client_id'),
+            config('services.google.web_client_id'),
+        ])->filter()->values();
+
+        if ($allowedAudiences->isNotEmpty() && ! $allowedAudiences->contains($profile['aud'] ?? null)) {
+            return response()->json(['message' => 'Client Google tidak sesuai dengan aplikasi BALIKOS.'], 422);
+        }
+
         if (($profile['email_verified'] ?? 'false') !== 'true' || empty($profile['email'])) {
             return response()->json(['message' => 'Email Google belum terverifikasi.'], 422);
         }
@@ -1102,7 +1111,7 @@ class BalikosApiController extends Controller
 
         $width = imagesx($source);
         $height = imagesy($source);
-        $maxSide = 1280;
+        $maxSide = 960;
         $scale = min(1, $maxSide / max($width, $height));
         $targetWidth = max(1, (int) round($width * $scale));
         $targetHeight = max(1, (int) round($height * $scale));
@@ -1113,7 +1122,7 @@ class BalikosApiController extends Controller
         imagecopyresampled($target, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
 
         ob_start();
-        imagejpeg($target, null, 78);
+        imagejpeg($target, null, 72);
         $contents = ob_get_clean();
         imagedestroy($source);
         imagedestroy($target);
@@ -1258,9 +1267,9 @@ class BalikosApiController extends Controller
             'fasilitas_lemari' => ['sometimes', 'boolean'],
             'fasilitas_meja' => ['sometimes', 'boolean'],
             'fasilitas_parkir' => ['sometimes', 'boolean'],
-            'foto' => ['nullable', 'image', 'max:2048'],
+            'foto' => ['nullable', 'image', 'max:5120'],
             'fotos' => ['nullable', 'array', 'max:5'],
-            'fotos.*' => ['image', 'max:2048'],
+            'fotos.*' => ['image', 'max:5120'],
             'hapus_foto_ids' => ['nullable', 'array'],
             'hapus_foto_ids.*' => ['integer'],
             'catatan' => ['nullable', 'string'],

@@ -7,7 +7,7 @@ Folder ini berisi teks dan checklist yang bisa dipakai saat membuat listing apli
 - App name: BALIKOS
 - Package name: `id.balisantih.balikos`
 - Version: `1.0.0`
-- Android versionCode: `4`
+- Android versionCode: `6`
 - Kategori: Business
 - Default language: Indonesian (id-ID)
 - App icon: `assets/playstore-icon.png` (512x512)
@@ -23,7 +23,11 @@ Pastikan domain `https://balikos.balisantih.com` sudah live untuk API, halaman l
 
 ## File AAB
 
-Untuk build AAB production dengan EAS:
+File AAB lokal hasil build disimpan di:
+
+`C:\laragon\www\balikos-mobile\playstore\BALIKOS-v1.0.0-6-release.aab`
+
+Jika ingin build ulang dengan EAS:
 
 ```bash
 cd C:\laragon\www\balikos-mobile

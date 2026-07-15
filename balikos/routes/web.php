@@ -26,11 +26,7 @@ Route::get('/balikos/media/{path}', function (string $path) {
     $fullPath = Storage::disk('public')->path($path);
     $mime = mime_content_type($fullPath) ?: 'application/octet-stream';
 
-    return response()->stream(function () use ($fullPath) {
-        $handle = fopen($fullPath, 'rb');
-        fpassthru($handle);
-        fclose($handle);
-    }, 200, [
+    return response()->file($fullPath, [
         'Content-Type' => $mime,
         'Cache-Control' => 'public, max-age=86400',
     ]);
