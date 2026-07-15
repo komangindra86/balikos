@@ -1673,15 +1673,60 @@ function FooterButtons({ onClose, onSave, loading, saveTitle = 'Simpan' }) {
 function RoomPhotoImage({ photo }) {
   const sources = photo.sources?.length ? photo.sources : [photo.uri].filter(Boolean);
   const [sourceIndex, setSourceIndex] = useState(0);
+  const [displayUri, setDisplayUri] = useState(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
   const uri = sources[sourceIndex];
+
+  useEffect(() => {
+    let alive = true;
+    setDisplayUri(null);
+    setLoadingPhoto(false);
+
+    if (!uri) return undefined;
+    if (!/^https?:\/\//.test(uri)) {
+      setDisplayUri(uri);
+      return undefined;
+    }
+
+    setLoadingPhoto(true);
+    fetch(uri, { headers: { Accept: 'image/*' } })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      }))
+      .then((dataUri) => {
+        if (alive) setDisplayUri(String(dataUri));
+      })
+      .catch((error) => {
+        console.warn('Room photo fetch failed', uri, error?.message || error);
+        if (alive) setSourceIndex((current) => current + 1);
+      })
+      .finally(() => {
+        if (alive) setLoadingPhoto(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [uri]);
 
   if (!uri || sourceIndex >= sources.length) {
     return <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View>;
   }
 
+  if (loadingPhoto || !displayUri) {
+    return <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Memuat foto...</Text></View>;
+  }
+
   return (
     <Image
-      source={{ uri }}
+      source={{ uri: displayUri }}
       style={styles.roomPhotoThumb}
       resizeMode="cover"
       fadeDuration={0}
