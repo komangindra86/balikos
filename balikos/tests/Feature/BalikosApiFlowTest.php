@@ -153,8 +153,8 @@ class BalikosApiFlowTest extends TestCase
             'harga_bulanan' => 1500000,
             'status' => 'kosong',
             'fotos' => [
-                $this->fakePngUpload('kamar-1.png'),
-                $this->fakePngUpload('kamar-2.png'),
+                UploadedFile::fake()->image('kamar-1.png', 432, 888),
+                UploadedFile::fake()->image('kamar-2.png', 432, 888),
             ],
         ])->assertCreated()
             ->assertJsonCount(2, 'data.fotos')
@@ -162,6 +162,7 @@ class BalikosApiFlowTest extends TestCase
 
         $this->assertSame(2, DB::table('kamar_fotos')->where('kamar_id', $room['id'])->count());
         $this->assertSame($room['fotos'][0]['path'], DB::table('kamars')->where('id', $room['id'])->value('foto'));
+        $this->assertStringEndsWith('.jpg', $room['fotos'][0]['path']);
         Storage::disk('public')->assertExists($room['fotos'][0]['path']);
         Storage::disk('public')->assertExists($room['fotos'][1]['path']);
 

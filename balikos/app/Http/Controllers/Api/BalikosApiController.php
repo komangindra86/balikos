@@ -1080,12 +1080,52 @@ class BalikosApiController extends Controller
         foreach (array_slice($files, 0, max(0, 5 - $currentCount)) as $file) {
             DB::table('kamar_fotos')->insert([
                 'kamar_id' => $kamarId,
-                'path' => $file->store('balikos/kamar', 'public'),
+                'path' => $this->storeOptimizedRoomPhoto($file),
                 'urutan' => ++$nextOrder,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
         }
+    }
+
+    private function storeOptimizedRoomPhoto($file): string
+    {
+        $fallback = fn () => $file->store('balikos/kamar', 'public');
+        if (! function_exists('imagecreatefromstring')) {
+            return $fallback();
+        }
+
+        $source = @imagecreatefromstring(file_get_contents($file->getRealPath()));
+        if (! $source) {
+            return $fallback();
+        }
+
+        $width = imagesx($source);
+        $height = imagesy($source);
+        $maxSide = 1280;
+        $scale = min(1, $maxSide / max($width, $height));
+        $targetWidth = max(1, (int) round($width * $scale));
+        $targetHeight = max(1, (int) round($height * $scale));
+        $target = imagecreatetruecolor($targetWidth, $targetHeight);
+
+        $white = imagecolorallocate($target, 255, 255, 255);
+        imagefilledrectangle($target, 0, 0, $targetWidth, $targetHeight, $white);
+        imagecopyresampled($target, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+
+        ob_start();
+        imagejpeg($target, null, 78);
+        $contents = ob_get_clean();
+        imagedestroy($source);
+        imagedestroy($target);
+
+        if (! $contents) {
+            return $fallback();
+        }
+
+        $path = 'balikos/kamar/'.Str::uuid().'.jpg';
+        Storage::disk('public')->put($path, $contents);
+
+        return $path;
     }
 
     private function syncPrimaryRoomPhoto(int $kamarId): void
