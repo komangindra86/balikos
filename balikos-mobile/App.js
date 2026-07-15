@@ -1213,7 +1213,7 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
   const isEdit = Boolean(form.id);
   const existingPhotos = (form.existing_fotos || []).map((photo, index) => ({
     key: `existing-${photo.id || photo.path || index}`,
-    uri: storageUrl(photo.path, apiBase) || photo.url,
+    uri: storageUrl(photo.path || photo.url, apiBase),
     id: photo.id,
     existing: true,
   }));
@@ -2102,10 +2102,10 @@ function roomPhotos(room, apiBase = DEFAULT_API) {
   if (photos.length) {
     return photos.map((photo, index) => ({
       key: String(photo.id || photo.path || index),
-      uri: storageUrl(photo.path, apiBase) || photo.url,
+      uri: storageUrl(photo.path || photo.url, apiBase),
     })).filter((photo) => photo.uri);
   }
-  const uri = storageUrl(room?.foto, apiBase) || room?.foto_url;
+  const uri = storageUrl(room?.foto || room?.foto_url, apiBase);
   return uri ? [{ key: String(room?.foto || uri), uri }] : [];
 }
 
