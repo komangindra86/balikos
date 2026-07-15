@@ -2116,13 +2116,13 @@ function roomName(rooms, id) {
 
 function storageUrl(path, apiBase) {
   if (!path) return '';
-  const root = (apiBase || DEFAULT_API).replace(/\/api\/balikos\/?$/, '');
+  const apiRoot = (apiBase || DEFAULT_API).replace(/\/$/, '');
   const absoluteStorage = String(path).match(/^https?:\/\/[^/]+\/storage\/(.+)$/);
-  if (absoluteStorage) return `${root}/storage/${absoluteStorage[1]}`;
+  if (absoluteStorage) return `${apiRoot}/media/${absoluteStorage[1]}`;
   const storagePath = String(path).replace(/^\/?storage\//, '');
   if (/^https?:\/\//.test(storagePath)) return storagePath;
-  if (storagePath && storagePath !== path) return `${root}/storage/${storagePath}`;
-  return `${root}/storage/${path}`;
+  if (storagePath && storagePath !== path) return `${apiRoot}/media/${storagePath}`;
+  return `${apiRoot}/media/${path}`;
 }
 
 function roomPhotos(room, apiBase = DEFAULT_API) {

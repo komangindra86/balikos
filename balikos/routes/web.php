@@ -5,6 +5,7 @@ use App\Http\Controllers\BalikosController;
 use App\Http\Controllers\BalikosPortalController;
 use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
     return redirect()->route('dashboard');
@@ -19,6 +20,11 @@ Route::get('/health', function () {
 })->name('health');
 Route::view('/privacy-policy', 'legal.privacy-policy')->name('privacy-policy');
 Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
+Route::get('/balikos/media/{path}', function (string $path) {
+    abort_if(str_contains($path, '..') || ! Storage::disk('public')->exists($path), 404);
+
+    return response()->file(Storage::disk('public')->path($path));
+})->where('path', '.*')->name('balikos.media');
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.store');
 Route::get('/balikos/portal/{token}', [BalikosPortalController::class, 'show'])->name('balikos.portal.show');

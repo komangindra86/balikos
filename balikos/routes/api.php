@@ -2,11 +2,17 @@
 
 use App\Http\Controllers\Api\BalikosApiController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 Route::prefix('balikos')->group(function () {
     Route::post('/register', [BalikosApiController::class, 'register']);
     Route::post('/login', [BalikosApiController::class, 'login']);
     Route::post('/google-login', [BalikosApiController::class, 'googleLogin']);
+    Route::get('/media/{path}', function (string $path) {
+        abort_if(str_contains($path, '..') || ! Storage::disk('public')->exists($path), 404);
+
+        return response()->file(Storage::disk('public')->path($path));
+    })->where('path', '.*');
     Route::get('/portal/{portalToken}', [BalikosApiController::class, 'portalShow']);
     Route::post('/portal/{portalToken}/tagihan/{id}/bukti', [BalikosApiController::class, 'portalUploadBukti'])->whereNumber('id');
 
