@@ -1129,11 +1129,16 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
 }
 
 function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChangeStatus, onCheckout }) {
+  const [hiddenPhotoKeys, setHiddenPhotoKeys] = useState([]);
+  useEffect(() => {
+    setHiddenPhotoKeys([]);
+  }, [room?.id]);
+
   if (!room) return null;
   const penghuni = room.penghuni_aktif;
   const canAdd = !penghuni && room.status === 'kosong';
   const labels = facilityLabels(room);
-  const photos = roomPhotos(room, apiBase);
+  const photos = roomPhotos(room, apiBase).filter((photo) => !hiddenPhotoKeys.includes(photo.key));
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -1144,7 +1149,7 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
             <View style={styles.roomPhotoGrid}>
               {photos.map((photo, index) => (
                 <View key={photo.key || index} style={styles.roomPhotoItem}>
-                  <RoomPhotoImage photo={photo} />
+                  <RoomPhotoImage photo={photo} onFail={() => setHiddenPhotoKeys((keys) => [...new Set([...keys, photo.key])])} />
                 </View>
               ))}
             </View>
@@ -1256,7 +1261,7 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
         <View style={styles.roomPhotoGrid}>
           {photos.map((photo) => (
             <View key={photo.key} style={styles.roomPhotoItem}>
-              <RoomPhotoImage photo={photo} />
+              <RoomPhotoImage photo={photo} showError />
               <Pressable onPress={() => removePhoto(photo)} style={({ pressed }) => [styles.removePhotoButton, pressed && styles.pressed]}>
                 <Text style={styles.removePhotoText}>Hapus</Text>
               </Pressable>
@@ -1670,7 +1675,7 @@ function FooterButtons({ onClose, onSave, loading, saveTitle = 'Simpan' }) {
   );
 }
 
-function RoomPhotoImage({ photo }) {
+function RoomPhotoImage({ photo, showError = false, onFail }) {
   const sources = photo.sources?.length ? photo.sources : [photo.uri].filter(Boolean);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [displayUri, setDisplayUri] = useState(null);
@@ -1705,7 +1710,10 @@ function RoomPhotoImage({ photo }) {
       })
       .catch((error) => {
         console.warn('Room photo fetch failed', uri, error?.message || error);
-        if (alive) setSourceIndex((current) => current + 1);
+        if (alive) {
+          if (sourceIndex >= sources.length - 1) onFail?.();
+          setSourceIndex((current) => current + 1);
+        }
       })
       .finally(() => {
         if (alive) setLoadingPhoto(false);
@@ -1717,7 +1725,7 @@ function RoomPhotoImage({ photo }) {
   }, [uri]);
 
   if (!uri || sourceIndex >= sources.length) {
-    return <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View>;
+    return showError ? <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View> : null;
   }
 
   if (loadingPhoto || !displayUri) {
@@ -1735,6 +1743,7 @@ function RoomPhotoImage({ photo }) {
       }}
       onError={(event) => {
         console.warn('Room photo failed', uri, event?.nativeEvent?.error);
+        if (sourceIndex >= sources.length - 1) onFail?.();
         setSourceIndex(sourceIndex + 1);
       }}
     />
