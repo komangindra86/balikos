@@ -357,14 +357,16 @@ export default function App() {
     if (!permission.granted) return Alert.alert('Izin foto diperlukan', 'Izinkan akses foto agar bisa upload foto kamar.');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: false,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
       quality: 0.45,
       exif: false,
     });
     if (!result.canceled) {
+      const selected = (result.assets || []).slice(0, remaining);
       setRoomForm((current) => ({
         ...current,
-        fotos: [...(current.fotos || []), result.assets[0]].slice(0, 5),
+        fotos: [...(current.fotos || []), ...selected].slice(0, 5),
       }));
     }
   }
@@ -404,7 +406,7 @@ export default function App() {
       (roomForm.fotos || []).forEach((photo, index) => {
         const payload = { uri: photo.uri, name: photo.fileName || `kamar-${index + 1}.jpg`, type: photo.mimeType || 'image/jpeg' };
         if (index === 0) form.append('foto', payload);
-        else form.append(`fotos[${index}]`, payload);
+        else form.append('fotos[]', payload);
       });
       (roomForm.hapus_foto_ids || []).forEach((id) => form.append('hapus_foto_ids[]', String(id)));
       await api(roomForm.id ? `/kamar/${roomForm.id}` : '/kamar', { method: 'POST', body: form, isMultipart: true });
@@ -1211,7 +1213,7 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
   const isEdit = Boolean(form.id);
   const existingPhotos = (form.existing_fotos || []).map((photo, index) => ({
     key: `existing-${photo.id || photo.path || index}`,
-    uri: photo.url || storageUrl(photo.path, apiBase),
+    uri: storageUrl(photo.path, apiBase) || photo.url,
     id: photo.id,
     existing: true,
   }));
@@ -2096,10 +2098,10 @@ function roomPhotos(room, apiBase = DEFAULT_API) {
   if (photos.length) {
     return photos.map((photo, index) => ({
       key: String(photo.id || photo.path || index),
-      uri: photo.url || storageUrl(photo.path, apiBase),
+      uri: storageUrl(photo.path, apiBase) || photo.url,
     })).filter((photo) => photo.uri);
   }
-  const uri = room?.foto_url || storageUrl(room?.foto, apiBase);
+  const uri = storageUrl(room?.foto, apiBase) || room?.foto_url;
   return uri ? [{ key: String(room?.foto || uri), uri }] : [];
 }
 
