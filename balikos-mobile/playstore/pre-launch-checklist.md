@@ -9,7 +9,7 @@
 - [ ] Google OAuth Client ID sudah diisi jika tombol Google Login ingin ditampilkan.
 - [ ] Demo account reviewer sudah dibuat di production.
 - [ ] Screenshot Play Store sudah dibuat dari device/emulator.
-- [ ] AAB production versionCode 6 sudah berhasil dibuat.
+- [ ] AAB production versionCode 5 sudah berhasil dibuat.
 - [ ] SHA-1 production sudah dipakai untuk OAuth Android Client.
 
 ## Smoke Test Production
