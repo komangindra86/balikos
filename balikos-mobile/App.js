@@ -2088,8 +2088,12 @@ function roomName(rooms, id) {
 
 function storageUrl(path, apiBase) {
   if (!path) return '';
-  if (/^https?:\/\//.test(path)) return path;
   const root = (apiBase || DEFAULT_API).replace(/\/api\/balikos\/?$/, '');
+  const absoluteStorage = String(path).match(/^https?:\/\/[^/]+\/storage\/(.+)$/);
+  if (absoluteStorage) return `${root}/storage/${absoluteStorage[1]}`;
+  const storagePath = String(path).replace(/^\/?storage\//, '');
+  if (/^https?:\/\//.test(storagePath)) return storagePath;
+  if (storagePath && storagePath !== path) return `${root}/storage/${storagePath}`;
   return `${root}/storage/${path}`;
 }
 
