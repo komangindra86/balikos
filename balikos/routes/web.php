@@ -23,7 +23,17 @@ Route::view('/account-deletion', 'legal.account-deletion')->name('account-deleti
 Route::get('/balikos/media/{path}', function (string $path) {
     abort_if(str_contains($path, '..') || ! Storage::disk('public')->exists($path), 404);
 
-    return response()->file(Storage::disk('public')->path($path));
+    $fullPath = Storage::disk('public')->path($path);
+    $mime = mime_content_type($fullPath) ?: 'application/octet-stream';
+
+    return response()->stream(function () use ($fullPath) {
+        $handle = fopen($fullPath, 'rb');
+        fpassthru($handle);
+        fclose($handle);
+    }, 200, [
+        'Content-Type' => $mime,
+        'Cache-Control' => 'public, max-age=86400',
+    ]);
 })->where('path', '.*')->name('balikos.media');
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.store');

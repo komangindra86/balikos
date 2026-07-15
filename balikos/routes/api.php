@@ -11,7 +11,17 @@ Route::prefix('balikos')->group(function () {
     Route::get('/media/{path}', function (string $path) {
         abort_if(str_contains($path, '..') || ! Storage::disk('public')->exists($path), 404);
 
-        return response()->file(Storage::disk('public')->path($path));
+        $fullPath = Storage::disk('public')->path($path);
+        $mime = mime_content_type($fullPath) ?: 'application/octet-stream';
+
+        return response()->stream(function () use ($fullPath) {
+            $handle = fopen($fullPath, 'rb');
+            fpassthru($handle);
+            fclose($handle);
+        }, 200, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
     })->where('path', '.*');
     Route::get('/portal/{portalToken}', [BalikosApiController::class, 'portalShow']);
     Route::post('/portal/{portalToken}/tagihan/{id}/bukti', [BalikosApiController::class, 'portalUploadBukti'])->whereNumber('id');
