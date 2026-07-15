@@ -3,6 +3,7 @@ import { Alert, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Press
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import * as FileSystem from 'expo-file-system';
 import * as Google from 'expo-auth-session/providers/google';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -1701,22 +1702,18 @@ function RoomPhotoImage({ photo, showError = false, onFail }) {
     }
 
     setLoadingPhoto(true);
-    fetch(uri, { headers: { Accept: 'image/*' } })
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.blob();
-      })
-      .then((blob) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      }))
-      .then((dataUri) => {
-        if (alive) setDisplayUri(String(dataUri));
+    const extension = uri.split('?')[0].split('.').pop()?.toLowerCase();
+    const safeExtension = ['jpg', 'jpeg', 'png', 'webp'].includes(extension) ? extension : 'jpg';
+    const cacheKey = uri.replace(/[^a-z0-9]/gi, '_').slice(-120);
+    const cacheUri = `${FileSystem.cacheDirectory}balikos-room-${cacheKey}.${safeExtension}`;
+
+    FileSystem.downloadAsync(uri, cacheUri, { headers: { Accept: 'image/*' } })
+      .then((download) => {
+        if (download.status < 200 || download.status >= 300) throw new Error(`HTTP ${download.status}`);
+        if (alive) setDisplayUri(download.uri);
       })
       .catch((error) => {
-        console.warn('Room photo fetch failed', uri, error?.message || error);
+        console.warn('Room photo download failed', uri, error?.message || error);
         if (alive) {
           if (sourceIndex >= sources.length - 1) onFail?.();
           setSourceIndex((current) => current + 1);
