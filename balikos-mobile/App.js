@@ -1684,6 +1684,10 @@ function RoomPhotoImage({ photo }) {
       source={{ uri }}
       style={styles.roomPhotoThumb}
       resizeMode="cover"
+      fadeDuration={0}
+      onLoad={(event) => {
+        console.log('Room photo loaded', uri, event?.nativeEvent?.source);
+      }}
       onError={(event) => {
         console.warn('Room photo failed', uri, event?.nativeEvent?.error);
         setSourceIndex(sourceIndex + 1);
@@ -2317,7 +2321,7 @@ const styles = StyleSheet.create({
   proofImage: { height: 190, borderRadius: 18, marginTop: spacing.sm, marginBottom: spacing.md, backgroundColor: colors.surfaceAlt },
   roomPhotoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.md },
   roomPhotoItem: { width: '48%', position: 'relative' },
-  roomPhotoThumb: { width: '100%', aspectRatio: 1.25, borderRadius: 16, backgroundColor: colors.surfaceAlt },
+  roomPhotoThumb: { width: '100%', height: 120, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.surfaceAlt },
   photoError: { alignItems: 'center', justifyContent: 'center', padding: spacing.sm },
   photoErrorText: { color: colors.muted, fontSize: 12, textAlign: 'center', fontWeight: '700' },
   roomCardImage: { width: '100%', height: 130, borderRadius: 16, marginTop: spacing.sm, marginBottom: spacing.sm, backgroundColor: colors.surfaceAlt },
