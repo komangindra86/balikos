@@ -1144,7 +1144,7 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
             <View style={styles.roomPhotoGrid}>
               {photos.map((photo, index) => (
                 <View key={photo.key || index} style={styles.roomPhotoItem}>
-                  <Image source={{ uri: photo.uri }} style={styles.roomPhotoThumb} />
+                  <RoomPhotoImage photo={photo} />
                 </View>
               ))}
             </View>
@@ -1214,12 +1214,14 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
   const existingPhotos = (form.existing_fotos || []).map((photo, index) => ({
     key: `existing-${photo.id || photo.path || index}`,
     uri: storageUrl(photo.path || photo.url, apiBase),
+    sources: roomPhotoSources(photo, apiBase),
     id: photo.id,
     existing: true,
   }));
   const newPhotos = (form.fotos || []).map((photo, index) => ({
     key: `new-${photo.uri}-${index}`,
     uri: photo.uri,
+    sources: [photo.uri],
     index,
     existing: false,
   }));
@@ -1254,7 +1256,7 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
         <View style={styles.roomPhotoGrid}>
           {photos.map((photo) => (
             <View key={photo.key} style={styles.roomPhotoItem}>
-              <Image source={{ uri: photo.uri }} style={styles.roomPhotoThumb} />
+              <RoomPhotoImage photo={photo} />
               <Pressable onPress={() => removePhoto(photo)} style={({ pressed }) => [styles.removePhotoButton, pressed && styles.pressed]}>
                 <Text style={styles.removePhotoText}>Hapus</Text>
               </Pressable>
@@ -1665,6 +1667,28 @@ function FooterButtons({ onClose, onSave, loading, saveTitle = 'Simpan' }) {
       <SecondaryButton title="Batal" onPress={onClose} style={{ flex: 1 }} />
       <PrimaryButton title={saveTitle} onPress={onSave} loading={loading} style={{ flex: 1.3 }} />
     </View>
+  );
+}
+
+function RoomPhotoImage({ photo }) {
+  const sources = photo.sources?.length ? photo.sources : [photo.uri].filter(Boolean);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const uri = sources[sourceIndex];
+
+  if (!uri || sourceIndex >= sources.length) {
+    return <View style={[styles.roomPhotoThumb, styles.photoError]}><Text style={styles.photoErrorText}>Foto gagal dimuat</Text></View>;
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.roomPhotoThumb}
+      resizeMode="cover"
+      onError={(event) => {
+        console.warn('Room photo failed', uri, event?.nativeEvent?.error);
+        setSourceIndex(sourceIndex + 1);
+      }}
+    />
   );
 }
 
@@ -2103,10 +2127,23 @@ function roomPhotos(room, apiBase = DEFAULT_API) {
     return photos.map((photo, index) => ({
       key: String(photo.id || photo.path || index),
       uri: storageUrl(photo.path || photo.url, apiBase),
+      sources: roomPhotoSources(photo, apiBase),
     })).filter((photo) => photo.uri);
   }
   const uri = storageUrl(room?.foto || room?.foto_url, apiBase);
-  return uri ? [{ key: String(room?.foto || uri), uri }] : [];
+  return uri ? [{ key: String(room?.foto || uri), uri, sources: roomPhotoSources({ path: room?.foto, url: room?.foto_url }, apiBase) }] : [];
+}
+
+function roomPhotoSources(photo, apiBase = DEFAULT_API) {
+  const candidates = [
+    storageUrl(photo?.path, apiBase),
+    storageUrl(photo?.url, apiBase),
+    photo?.url,
+    storageUrl(photo?.path, DEFAULT_API),
+    storageUrl(photo?.url, DEFAULT_API),
+  ].filter(Boolean);
+
+  return [...new Set(candidates)];
 }
 
 function proofImageUrl(bill, apiBase) {
@@ -2281,6 +2318,8 @@ const styles = StyleSheet.create({
   roomPhotoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.md },
   roomPhotoItem: { width: '48%', position: 'relative' },
   roomPhotoThumb: { width: '100%', aspectRatio: 1.25, borderRadius: 16, backgroundColor: colors.surfaceAlt },
+  photoError: { alignItems: 'center', justifyContent: 'center', padding: spacing.sm },
+  photoErrorText: { color: colors.muted, fontSize: 12, textAlign: 'center', fontWeight: '700' },
   roomCardImage: { width: '100%', height: 130, borderRadius: 16, marginTop: spacing.sm, marginBottom: spacing.sm, backgroundColor: colors.surfaceAlt },
   removePhotoButton: { position: 'absolute', right: 8, bottom: 8, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: colors.border },
   removePhotoText: { color: colors.danger, fontWeight: '800', fontSize: 12 },
