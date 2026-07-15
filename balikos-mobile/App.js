@@ -353,17 +353,18 @@ export default function App() {
     const used = (roomForm.existing_fotos?.length || 0) + (roomForm.fotos?.length || 0);
     const remaining = Math.max(0, 5 - used);
     if (remaining <= 0) return Alert.alert('Foto sudah maksimal', 'Maksimal 5 foto untuk setiap kamar.');
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return Alert.alert('Izin foto diperlukan', 'Izinkan akses foto agar bisa upload foto kamar.');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: remaining,
+      allowsMultipleSelection: false,
       quality: 0.45,
       exif: false,
     });
     if (!result.canceled) {
       setRoomForm((current) => ({
         ...current,
-        fotos: [...(current.fotos || []), ...result.assets.slice(0, remaining)],
+        fotos: [...(current.fotos || []), result.assets[0]].slice(0, 5),
       }));
     }
   }
@@ -401,7 +402,9 @@ export default function App() {
         form.append(key, typeof payloadValue === 'boolean' ? (payloadValue ? '1' : '0') : String(payloadValue));
       });
       (roomForm.fotos || []).forEach((photo, index) => {
-        form.append('fotos[]', { uri: photo.uri, name: photo.fileName || `kamar-${index + 1}.jpg`, type: photo.mimeType || 'image/jpeg' });
+        const payload = { uri: photo.uri, name: photo.fileName || `kamar-${index + 1}.jpg`, type: photo.mimeType || 'image/jpeg' };
+        if (index === 0) form.append('foto', payload);
+        else form.append(`fotos[${index}]`, payload);
       });
       (roomForm.hapus_foto_ids || []).forEach((id) => form.append('hapus_foto_ids[]', String(id)));
       await api(roomForm.id ? `/kamar/${roomForm.id}` : '/kamar', { method: 'POST', body: form, isMultipart: true });
@@ -1130,7 +1133,7 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
   const labels = facilityLabels(room);
   const photos = roomPhotos(room, apiBase);
   return (
-    <Modal visible transparent animationType="slide">
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <ScrollView style={styles.modalCard}>
           <Text style={styles.modalTitle}>Kamar {room.nomor_kamar}</Text>
@@ -1164,7 +1167,7 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onCheck
   const sortedBills = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status) || Number(b.tahun) - Number(a.tahun) || Number(b.bulan) - Number(a.bulan));
   const hasActiveBill = sortedBills.some((bill) => bill.status !== 'lunas');
   return (
-    <Modal visible transparent animationType="slide">
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <ScrollView style={styles.modalCard}>
           <Text style={styles.modalTitle}>{occupant.nama_lengkap}</Text>
@@ -1443,7 +1446,7 @@ function PaymentMethodCard({ item, onToggle, onDelete }) {
 
 function PaymentInfoModal({ visible, onClose }) {
   return (
-    <BaseModal visible={visible} title="Info Alur Pembayaran">
+    <BaseModal visible={visible} title="Info Alur Pembayaran" onClose={onClose}>
       <View style={styles.infoBlock}>
         <Text style={styles.infoTitle}>1. Pilih cara menerima pembayaran</Text>
         <Text style={styles.infoText}>Pemilik kos cukup memilih salah satu metode aktif untuk kos ini. Metode aktif itulah yang nanti dilihat penghuni di portal pembayaran.</Text>
@@ -1637,9 +1640,9 @@ function Shell({ children }) {
   );
 }
 
-function BaseModal({ visible, title, children }) {
+function BaseModal({ visible, title, children, onClose }) {
   return (
-    <Modal visible={visible} animationType="slide">
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose || (() => {})}>
       <KeyboardAvoidingView style={styles.app} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -1917,7 +1920,7 @@ function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview })
 function ImagePreviewModal({ uri, onClose }) {
   if (!uri) return null;
   return (
-    <Modal visible transparent animationType="fade">
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.imagePreviewOverlay}>
         <Image source={{ uri }} style={styles.imagePreview} resizeMode="contain" />
         <PrimaryButton title="Tutup" onPress={onClose} style={styles.imagePreviewButton} />

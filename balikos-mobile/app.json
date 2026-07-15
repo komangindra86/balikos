@@ -4,7 +4,7 @@
     "slug": "balikos",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "balikos",
+    "scheme": "id.balisantih.balikos",
     "extra": {
       "apiBase": "https://balikos.balisantih.com/api/balikos",
       "portalOrigin": "https://balikos.balisantih.com",
@@ -23,6 +23,9 @@
     "android": {
       "package": "id.balisantih.balikos",
       "versionCode": 4,
+      "permissions": [
+        "READ_MEDIA_IMAGES"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#063a8f"
