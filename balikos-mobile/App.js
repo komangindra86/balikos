@@ -45,7 +45,7 @@ const monthOptions = [
   { value: '12', label: 'Des' },
 ];
 
-const emptyKosForm = { nama_kos: '', alamat: '', kecamatan: '', desa: '', banjar: '', no_wa: '', status: 'aktif' };
+const emptyKosForm = { id: null, nama_kos: '', alamat: '', kecamatan: '', desa: '', banjar: '', no_wa: '', status: 'aktif' };
 const emptyRoomForm = {
   id: null,
   nomor_kamar: '',
@@ -65,10 +65,12 @@ const emptyRoomForm = {
   hapus_foto_ids: [],
 };
 const emptyOccupantForm = {
+  id: null,
   kamar_id: '',
   nama_lengkap: '',
   no_ktp: '',
   foto_ktp: null,
+  existing_foto_ktp: null,
   no_wa: '',
   alamat_asal: '',
   pekerjaan: '',
@@ -417,13 +419,65 @@ export default function App() {
     if (!kosForm.alamat.trim()) return Alert.alert('Alamat wajib diisi', 'Isi alamat lengkap kos.');
     if (!kosForm.kecamatan.trim()) return Alert.alert('Kecamatan wajib diisi', 'Contoh: Denpasar Selatan.');
     await submit(async () => {
-      const response = await api('/kos', { method: 'POST', body: kosForm });
+      const payload = { ...kosForm };
+      delete payload.id;
+      const response = await api(kosForm.id ? `/kos/${kosForm.id}` : '/kos', { method: kosForm.id ? 'PUT' : 'POST', body: payload });
       const createdId = response.data?.id;
       setKosForm(emptyKosForm);
       await loadKos();
       if (createdId) setActiveKosId(createdId);
       setModal(null);
     }, 'Gagal menyimpan kos');
+  }
+
+  function openKosCreateModal() {
+    setKosForm(emptyKosForm);
+    setModal('kos');
+  }
+
+  function openKosEditModal() {
+    if (!activeKos) return Alert.alert('Pilih kos', 'Pilih kos yang ingin diedit.');
+    setKosForm({
+      id: activeKos.id,
+      nama_kos: activeKos.nama_kos || '',
+      alamat: activeKos.alamat || '',
+      kecamatan: activeKos.kecamatan || '',
+      desa: activeKos.desa || '',
+      banjar: activeKos.banjar || '',
+      no_wa: activeKos.no_wa || '',
+      status: activeKos.status || 'aktif',
+    });
+    setModal('kos');
+  }
+
+  async function deleteKos() {
+    if (!kosForm.id) return;
+    Alert.alert(
+      'Hapus kos?',
+      `Data ${kosForm.nama_kos} akan dihapus beserta kamar, penghuni, tagihan, dan data lain di dalamnya. Lanjutkan hanya jika benar-benar yakin.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: async () => {
+            await submit(async () => {
+              await api(`/kos/${kosForm.id}`, { method: 'DELETE' });
+              setModal(null);
+              setKosForm(emptyKosForm);
+              const response = await api('/kos');
+              const nextKos = response.data || [];
+              setKosList(nextKos);
+              setActiveKosId(nextKos[0]?.id || null);
+              setRooms([]);
+              setOccupants([]);
+              setBills([]);
+              setDashboard(null);
+            }, 'Gagal menghapus kos');
+          },
+        },
+      ],
+    );
   }
 
   async function saveRoom() {
@@ -463,6 +517,27 @@ export default function App() {
     if (rooms.length === 0) loadRooms();
   }
 
+  function openOccupantEditModal(occupant) {
+    setOccupantDetail(null);
+    setOccupantForm({
+      id: occupant.id,
+      kamar_id: String(occupant.kamar_id || ''),
+      nama_lengkap: occupant.nama_lengkap || '',
+      no_ktp: occupant.no_ktp || '',
+      foto_ktp: null,
+      existing_foto_ktp: occupant.foto_ktp || null,
+      no_wa: occupant.no_wa || '',
+      alamat_asal: occupant.alamat_asal || '',
+      pekerjaan: occupant.pekerjaan || '',
+      no_kendaraan: occupant.no_kendaraan || '',
+      kontak_darurat: occupant.kontak_darurat || '',
+      tanggal_masuk: occupant.tanggal_masuk || today(),
+      status: occupant.status || 'aktif',
+    });
+    setModal('occupant');
+    if (rooms.length === 0) loadRooms();
+  }
+
   async function saveOccupant() {
     if (!activeKosId) return Alert.alert('Pilih kos', 'Pilih kos aktif terlebih dahulu.');
     if (!occupantForm.kamar_id) return Alert.alert('Pilih kamar', 'Pilih kamar kosong untuk penghuni ini.');
@@ -475,8 +550,9 @@ export default function App() {
       form.append('kos_id', String(activeKosId));
       form.append('kamar_id', String(Number(occupantForm.kamar_id)));
       form.append('jatuh_tempo_hari', String(jatuhTempoHari));
+      if (occupantForm.id) form.append('_method', 'PUT');
       Object.entries(occupantForm).forEach(([key, value]) => {
-        if (key === 'foto_ktp' || value === null || value === '') return;
+        if (['id', 'foto_ktp', 'existing_foto_ktp'].includes(key) || value === null || value === '') return;
         form.append(key, String(value));
       });
       if (occupantForm.foto_ktp) {
@@ -486,7 +562,7 @@ export default function App() {
           type: occupantForm.foto_ktp.mimeType || 'image/jpeg',
         });
       }
-      await api('/penghuni', { method: 'POST', body: form, isMultipart: true });
+      await api(occupantForm.id ? `/penghuni/${occupantForm.id}` : '/penghuni', { method: 'POST', body: form, isMultipart: true });
       setModal(null);
       setOccupantForm(emptyOccupantForm);
       await loadOccupants();
@@ -890,7 +966,7 @@ export default function App() {
           />
         )}
       >
-        <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={setActiveKosId} onAdd={() => setModal('kos')} />
+        <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={setActiveKosId} onAdd={openKosCreateModal} onEdit={openKosEditModal} />
         {tab === 'dashboard' && <Dashboard data={dashboard} activeKos={activeKos} setTab={setTab} />}
         {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
@@ -898,11 +974,11 @@ export default function App() {
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
-      <OccupantDetailModal occupant={occupantDetail} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(occupantDetail?.id))} rooms={rooms} apiBase={apiBase} onClose={() => setOccupantDetail(null)} onCheckout={checkoutOccupant} onSharePortal={shareOccupantPortal} onGenerateBill={generateBillForOccupant} onCashPay={openCashPaymentForOccupant} updateBillStatus={updateBillStatus} openImagePreview={setImagePreview} />
+      <OccupantDetailModal occupant={occupantDetail} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(occupantDetail?.id))} rooms={rooms} apiBase={apiBase} onClose={() => setOccupantDetail(null)} onEdit={openOccupantEditModal} onCheckout={checkoutOccupant} onSharePortal={shareOccupantPortal} onGenerateBill={generateBillForOccupant} onCashPay={openCashPaymentForOccupant} updateBillStatus={updateBillStatus} openImagePreview={setImagePreview} />
       <ImagePreviewModal uri={imagePreview} onClose={() => setImagePreview(null)} />
-      <KosFormModal visible={modal === 'kos'} form={kosForm} setForm={setKosForm} onSave={saveKos} onClose={() => { setModal(null); setKosForm(emptyKosForm); }} loading={loading} />
+      <KosFormModal visible={modal === 'kos'} form={kosForm} setForm={setKosForm} onSave={saveKos} onDelete={deleteKos} onClose={() => { setModal(null); setKosForm(emptyKosForm); }} loading={loading} />
       <RoomFormModal visible={modal === 'room'} form={roomForm} setForm={setRoomForm} apiBase={apiBase} onPick={pickRoomImage} onSave={saveRoom} onClose={() => { setModal(null); setRoomForm(emptyRoomForm); }} loading={loading} />
-      <OccupantFormModal visible={modal === 'occupant'} form={occupantForm} setForm={setOccupantForm} rooms={emptyRooms} onPickKtp={pickKtpImage} onSave={saveOccupant} onClose={() => setModal(null)} loading={loading} />
+      <OccupantFormModal visible={modal === 'occupant'} form={occupantForm} setForm={setOccupantForm} rooms={rooms} emptyRooms={emptyRooms} apiBase={apiBase} onPickKtp={pickKtpImage} onSave={saveOccupant} onClose={() => { setModal(null); setOccupantForm(emptyOccupantForm); }} loading={loading} />
       <BillFormModal visible={modal === 'bill'} form={billForm} setForm={setBillForm} rooms={rooms} onSave={generateBills} onClose={() => setModal(null)} loading={loading} />
       <MultiPayModal visible={modal === 'multiPay'} form={multiPayForm} setForm={setMultiPayForm} rooms={rooms} occupant={multiPayContext} onSave={payMultiMonth} onClose={() => { setModal(null); setMultiPayContext(null); setMultiPayForm(emptyMultiPayForm); }} loading={loading} />
       <RoomStatusModal visible={modal === 'roomStatus'} form={roomStatusForm} setForm={setRoomStatusForm} onSave={saveRoomStatus} onClose={() => setModal(null)} loading={loading} />
@@ -1025,17 +1101,19 @@ function KosSetup({ form, setForm, saveKos, logout, loading }) {
   );
 }
 
-function KosFormModal({ visible, form, setForm, onSave, onClose, loading }) {
+function KosFormModal({ visible, form, setForm, onSave, onDelete, onClose, loading }) {
+  const isEdit = Boolean(form.id);
   return (
-    <BaseModal visible={visible} title="Tambah Kos" onClose={onClose}>
-      <Text style={styles.muted}>Isi data kos baru. Setelah disimpan, kos ini otomatis menjadi kos aktif.</Text>
+    <BaseModal visible={visible} title={isEdit ? 'Edit Kos' : 'Tambah Kos'} onClose={onClose}>
+      <Text style={styles.muted}>{isEdit ? 'Perbarui data kos jika ada nama, alamat, atau kontak yang salah.' : 'Isi data kos baru. Setelah disimpan, kos ini otomatis menjadi kos aktif.'}</Text>
       <FormField label="Nama kos" value={form.nama_kos} onChangeText={(v) => setForm({ ...form, nama_kos: v })} placeholder="Contoh: Kos Melati Denpasar" />
       <FormField label="Alamat" value={form.alamat} onChangeText={(v) => setForm({ ...form, alamat: v })} multiline />
       <FormField label="Kecamatan" value={form.kecamatan} onChangeText={(v) => setForm({ ...form, kecamatan: v })} placeholder="Contoh: Denpasar Selatan" />
       <FormField label="Desa" value={form.desa} onChangeText={(v) => setForm({ ...form, desa: v })} />
       <FormField label="Banjar" value={form.banjar} onChangeText={(v) => setForm({ ...form, banjar: v })} />
       <FormField label="WhatsApp kos" value={form.no_wa} onChangeText={(v) => setForm({ ...form, no_wa: v })} keyboardType="phone-pad" />
-      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle="Simpan Kos" />
+      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={isEdit ? 'Simpan Perubahan' : 'Simpan Kos'} />
+      {isEdit ? <SecondaryButton title="Hapus Kos" onPress={onDelete} style={[styles.cardButton, styles.dangerButton]} /> : null}
     </BaseModal>
   );
 }
@@ -1324,7 +1402,7 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
   );
 }
 
-function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onCheckout, onSharePortal, onGenerateBill, onCashPay, updateBillStatus, openImagePreview }) {
+function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit, onCheckout, onSharePortal, onGenerateBill, onCashPay, updateBillStatus, openImagePreview }) {
   if (!occupant) return null;
   const sortedBills = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status) || Number(b.tahun) - Number(a.tahun) || Number(b.bulan) - Number(a.bulan));
   const hasActiveBill = sortedBills.some((bill) => bill.status !== 'lunas');
@@ -1365,6 +1443,7 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onCheck
           <SimpleCard title="Tanggal" lines={[`Masuk ${occupant.tanggal_masuk || '-'}`, `Keluar ${occupant.tanggal_keluar || '-'}`]} />
           <Text style={styles.sectionTitle}>Lainnya</Text>
           <SimpleCard title="Catatan Penghuni" lines={[occupant.pekerjaan || 'Pekerjaan -', occupant.alamat_asal || 'Alamat asal -', occupant.no_kendaraan || 'Kendaraan -']} />
+          <SecondaryButton title="Edit Data Penghuni" onPress={() => onEdit(occupant)} style={{ marginTop: spacing.md }} />
           {occupant.status === 'aktif' ? <SecondaryButton title="Keluarkan Penghuni" onPress={() => onCheckout(occupant)} style={{ marginTop: spacing.md }} /> : null}
           <SecondaryButton title="Tutup" onPress={onClose} style={{ marginTop: spacing.md }} />
         </ScrollView>
@@ -1434,24 +1513,29 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
   );
 }
 
-function OccupantFormModal({ visible, form, setForm, rooms, onPickKtp, onSave, onClose, loading }) {
+function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase, onPickKtp, onSave, onClose, loading }) {
+  const isEdit = Boolean(form.id);
+  const availableRooms = isEdit
+    ? rooms.filter((room) => room.status === 'kosong' || String(room.id) === String(form.kamar_id))
+    : emptyRooms;
+  const ktpUri = form.foto_ktp?.uri || (form.existing_foto_ktp ? storageUrl(form.existing_foto_ktp, apiBase) : null);
   return (
-    <BaseModal visible={visible} title="Tambah Penghuni" onClose={onClose}>
-      <Text style={styles.muted}>Pilih kamar kosong, lalu isi data utama penghuni.</Text>
-      <Text style={styles.label}>Kamar kosong</Text>
-      <OptionGrid items={rooms.map((room) => ({ value: String(room.id), label: `Kamar ${room.nomor_kamar}` }))} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
+    <BaseModal visible={visible} title={isEdit ? 'Edit Penghuni' : 'Tambah Penghuni'} onClose={onClose}>
+      <Text style={styles.muted}>{isEdit ? 'Perbaiki data penghuni jika ada salah input. Jika pindah kamar, pilih kamar kosong yang baru.' : 'Pilih kamar kosong, lalu isi data utama penghuni.'}</Text>
+      <Text style={styles.label}>{isEdit ? 'Kamar penghuni' : 'Kamar kosong'}</Text>
+      <OptionGrid items={availableRooms.map((room) => ({ value: String(room.id), label: `Kamar ${room.nomor_kamar}` }))} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
       <FormField label="Nama lengkap" value={form.nama_lengkap} onChangeText={(v) => setForm({ ...form, nama_lengkap: v })} />
       <FormField label="Nomor WhatsApp" value={form.no_wa} onChangeText={(v) => setForm({ ...form, no_wa: v })} keyboardType="phone-pad" />
       <FormField label="Nomor KTP" value={form.no_ktp} onChangeText={(v) => setForm({ ...form, no_ktp: v })} />
       <Text style={styles.label}>Upload KTP</Text>
-      {form.foto_ktp ? <Image source={{ uri: form.foto_ktp.uri }} style={styles.preview} /> : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto KTP dipilih.</Text></View>}
+      {ktpUri ? <Image source={{ uri: ktpUri }} style={styles.preview} /> : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto KTP dipilih.</Text></View>}
       <SecondaryButton title={form.foto_ktp ? 'Ganti Foto KTP' : 'Pilih Foto KTP'} onPress={onPickKtp} />
       <CompactDatePicker label="Tanggal masuk" value={form.tanggal_masuk} onChange={(tanggal_masuk) => setForm({ ...form, tanggal_masuk })} />
       <FormField label="Pekerjaan" value={form.pekerjaan} onChangeText={(v) => setForm({ ...form, pekerjaan: v })} />
       <FormField label="Alamat asal" value={form.alamat_asal} onChangeText={(v) => setForm({ ...form, alamat_asal: v })} multiline />
       <FormField label="No kendaraan" value={form.no_kendaraan} onChangeText={(v) => setForm({ ...form, no_kendaraan: v })} />
       <FormField label="Kontak darurat" value={form.kontak_darurat} onChangeText={(v) => setForm({ ...form, kontak_darurat: v })} />
-      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} />
+      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={isEdit ? 'Simpan Perubahan' : 'Simpan Penghuni'} />
     </BaseModal>
   );
 }
@@ -2013,11 +2097,12 @@ function QuickAction({ title, onPress }) {
   );
 }
 
-function KosPicker({ kosList, activeKosId, setActiveKosId, onAdd }) {
+function KosPicker({ kosList, activeKosId, setActiveKosId, onAdd, onEdit }) {
   return (
     <View style={styles.kosPills}>
       {kosList.map((kos) => <Pressable key={kos.id} onPress={() => setActiveKosId(kos.id)} style={[styles.kosPill, activeKosId === kos.id && styles.kosPillActive]}><Text style={[styles.kosPillText, activeKosId === kos.id && styles.kosPillTextActive]}>{kos.nama_kos}</Text></Pressable>)}
       <Pressable onPress={onAdd} style={[styles.kosPill, styles.kosAddPill]}><Text style={styles.kosAddText}>+ Kos</Text></Pressable>
+      {activeKosId ? <Pressable onPress={onEdit} style={[styles.kosPill, styles.kosEditPill]}><Text style={styles.kosEditText}>Edit Kos</Text></Pressable> : null}
     </View>
   );
 }
@@ -2633,6 +2718,8 @@ const styles = StyleSheet.create({
   kosPillTextActive: { color: colors.white },
   kosAddPill: { borderColor: colors.gold, borderStyle: 'dashed', backgroundColor: colors.surface },
   kosAddText: { color: colors.gold, fontWeight: '800' },
+  kosEditPill: { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+  kosEditText: { color: colors.muted, fontWeight: '800' },
   bottomNav: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.md, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', padding: 5 },
   navItem: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
   navText: { color: colors.muted, fontWeight: '700', fontSize: 11 },
