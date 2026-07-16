@@ -22,7 +22,7 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
-      "versionCode": 7,
+      "versionCode": 8,
       "permissions": [
         "READ_MEDIA_IMAGES"
       ],
