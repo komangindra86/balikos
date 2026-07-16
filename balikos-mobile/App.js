@@ -1169,10 +1169,14 @@ function OccupantsScreen({ occupants, rooms, bills, openOccupantModal, openOccup
   const unpaidCount = occupants.filter((item) => Number(item.tagihan_aktif_count || 0) > 0).length;
   const verifyCount = occupants.filter((item) => Number(item.tagihan_verifikasi_count || 0) > 0).length;
   const dueSoonCount = occupants.filter((item) => item.akan_jatuh_tempo).length;
+  const exitedDebtCount = occupants.filter((item) => item.status === 'keluar' && (Number(item.tagihan_aktif_count || 0) > 0 || Number(item.tagihan_verifikasi_count || 0) > 0)).length;
   const filteredOccupants = occupants.filter((item) => {
+    const hasUnresolvedBill = Number(item.tagihan_aktif_count || 0) > 0 || Number(item.tagihan_verifikasi_count || 0) > 0;
+    if (filter === 'semua' && item.status === 'keluar' && !hasUnresolvedBill) return false;
     if (filter === 'tagihan' && Number(item.tagihan_aktif_count || 0) <= 0) return false;
     if (filter === 'verifikasi' && Number(item.tagihan_verifikasi_count || 0) <= 0) return false;
     if (filter === 'jatuh_tempo' && !item.akan_jatuh_tempo) return false;
+    if (filter === 'keluar' && item.status !== 'keluar') return false;
     if (!keyword) return true;
     const room = roomName(rooms, item.kamar_id);
     return [
@@ -1183,12 +1187,16 @@ function OccupantsScreen({ occupants, rooms, bills, openOccupantModal, openOccup
       item.no_kendaraan,
       Number(item.tagihan_aktif_count) > 0 ? 'tagihan belum bayar' : '',
       Number(item.tagihan_verifikasi_count) > 0 ? 'perlu verifikasi bukti bayar' : '',
+      item.status === 'keluar' ? 'sudah keluar mantan penghuni' : '',
+      item.status === 'keluar' && hasUnresolvedBill ? 'sudah keluar masih ada tunggakan' : '',
       item.akan_jatuh_tempo ? 'akan jatuh tempo' : '',
       room,
     ].filter(Boolean).some((value) => String(value).toLowerCase().includes(keyword));
   }).sort((a, b) => {
-    const priorityA = Number(a.tagihan_verifikasi_count || 0) * 5 + Number(a.tagihan_aktif_count || 0) * 3 + (a.akan_jatuh_tempo ? 1 : 0);
-    const priorityB = Number(b.tagihan_verifikasi_count || 0) * 5 + Number(b.tagihan_aktif_count || 0) * 3 + (b.akan_jatuh_tempo ? 1 : 0);
+    const exitDebtA = a.status === 'keluar' && (Number(a.tagihan_aktif_count || 0) > 0 || Number(a.tagihan_verifikasi_count || 0) > 0) ? 2 : 0;
+    const exitDebtB = b.status === 'keluar' && (Number(b.tagihan_aktif_count || 0) > 0 || Number(b.tagihan_verifikasi_count || 0) > 0) ? 2 : 0;
+    const priorityA = Number(a.tagihan_verifikasi_count || 0) * 5 + Number(a.tagihan_aktif_count || 0) * 3 + exitDebtA + (a.akan_jatuh_tempo ? 1 : 0);
+    const priorityB = Number(b.tagihan_verifikasi_count || 0) * 5 + Number(b.tagihan_aktif_count || 0) * 3 + exitDebtB + (b.akan_jatuh_tempo ? 1 : 0);
     return priorityB - priorityA || String(a.nama_lengkap || '').localeCompare(String(b.nama_lengkap || ''));
   });
 
@@ -1199,13 +1207,14 @@ function OccupantsScreen({ occupants, rooms, bills, openOccupantModal, openOccup
         <MiniSummary label="Aktif" value={activeCount} />
         <MiniSummary label="Belum Bayar" value={unpaidCount} />
         <MiniSummary label="Perlu Cek" value={verifyCount} />
+        <MiniSummary label="Keluar Nunggak" value={exitedDebtCount} />
       </View>
       <View style={styles.compactActionPanel}>
         <Text style={styles.cardTitle}>Alur simpel</Text>
-        <Text style={styles.helperText}>Klik nama penghuni untuk verifikasi bukti, bayar tunai, buat tagihan jatuh tempo, atau share portal.</Text>
+        <Text style={styles.helperText}>Klik nama penghuni untuk verifikasi bukti, bayar tunai, buat tagihan jatuh tempo, atau share portal. Penghuni keluar yang masih punya tunggakan tetap muncul sampai pembayaran selesai.</Text>
         {dueSoonCount > 0 ? <SecondaryButton title={`Buat ${dueSoonCount} Tagihan 7 Hari Ini`} onPress={autoGenerateBills} style={{ marginTop: spacing.sm }} /> : null}
       </View>
-      <Segment items={['semua', 'tagihan', 'verifikasi', 'jatuh_tempo']} labels={{ semua: 'Semua', tagihan: 'Belum bayar', verifikasi: 'Perlu cek', jatuh_tempo: 'Jatuh tempo' }} value={filter} onChange={setFilter} />
+      <Segment items={['semua', 'tagihan', 'verifikasi', 'jatuh_tempo', 'keluar']} labels={{ semua: 'Aktif+', tagihan: 'Belum bayar', verifikasi: 'Perlu cek', jatuh_tempo: 'Jatuh tempo', keluar: 'Keluar' }} value={filter} onChange={setFilter} />
       <FormField label="Cari penghuni" value={search} onChangeText={setSearch} placeholder="Nama, kamar, WA, kendaraan" />
       {filteredOccupants.map((item) => <OccupantCard key={item.id} item={item} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(item.id))} rooms={rooms} onPress={() => openOccupantDetail(item)} />)}
       {occupants.length === 0 ? <Empty text="Belum ada penghuni." /> : null}
@@ -1406,6 +1415,8 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
   if (!occupant) return null;
   const sortedBills = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status) || Number(b.tahun) - Number(a.tahun) || Number(b.bulan) - Number(a.bulan));
   const hasActiveBill = sortedBills.some((bill) => bill.status !== 'lunas');
+  const isExited = occupant.status === 'keluar';
+  const canCollectPayment = !isExited || hasActiveBill;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -1422,11 +1433,22 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
               <Text style={styles.noticeText}>Penghuni ini akan jatuh tempo pada {occupant.jatuh_tempo_berikutnya}. Buat tagihan, lalu share portal ke penghuni.</Text>
             </View>
           ) : null}
-          <View style={styles.actionRow}>
-            <PrimaryButton title="Share Portal" onPress={() => onSharePortal(occupant)} style={styles.flexButton} />
-            <SecondaryButton title="Bayar Tunai" onPress={() => onCashPay(occupant)} style={styles.flexButton} />
-          </View>
-          {occupant.akan_jatuh_tempo ? (
+          {isExited && hasActiveBill ? (
+            <View style={styles.notice}>
+              <Text style={styles.noticeText}>Penghuni ini sudah keluar, tapi masih ada tagihan yang belum selesai. Pemilik tetap bisa share portal atau mencatat pembayaran tunai.</Text>
+            </View>
+          ) : null}
+          {canCollectPayment ? (
+            <View style={styles.actionRow}>
+              <PrimaryButton title="Share Portal" onPress={() => onSharePortal(occupant)} style={styles.flexButton} />
+              <SecondaryButton title="Bayar Tunai" onPress={() => onCashPay(occupant)} style={styles.flexButton} />
+            </View>
+          ) : (
+            <View style={styles.notice}>
+              <Text style={styles.noticeText}>Penghuni ini sudah keluar dan tidak memiliki tunggakan aktif.</Text>
+            </View>
+          )}
+          {occupant.status === 'aktif' && occupant.akan_jatuh_tempo ? (
             <SecondaryButton title="Buat Tagihan Jatuh Tempo" onPress={() => onGenerateBill(occupant)} style={{ marginTop: spacing.sm }} />
           ) : null}
           {sortedBills.map((bill) => <OccupantBillCard key={bill.id} bill={bill} apiBase={apiBase} updateBillStatus={updateBillStatus} openImagePreview={openImagePreview} />)}
@@ -2186,6 +2208,8 @@ function RoomCardPhoto({ photo }) {
 function OccupantCard({ item, bills, rooms, onPress }) {
   const openBills = Number(item.tagihan_aktif_count || 0);
   const verifyBills = Number(item.tagihan_verifikasi_count || 0);
+  const isExited = item.status === 'keluar';
+  const hasDebtAfterExit = isExited && (openBills > 0 || verifyBills > 0);
   const latestBill = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status))[0];
   const paymentLabel = verifyBills > 0
     ? `${verifyBills} pembayaran perlu dicek`
@@ -2193,20 +2217,28 @@ function OccupantCard({ item, bills, rooms, onPress }) {
       ? `${openBills} tagihan belum bayar`
       : item.akan_jatuh_tempo
         ? `Jatuh tempo ${item.jatuh_tempo_berikutnya}`
-        : 'Pembayaran aman';
+        : isExited
+          ? 'Sudah keluar dan tidak ada tunggakan'
+          : 'Pembayaran aman';
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.rowBetween}>
         <Text style={styles.cardTitle}>{item.nama_lengkap}</Text>
         <Text style={[styles.badge, statusStyle(item.status)]}>{item.status}</Text>
       </View>
-      <Text style={styles.muted}>Kamar {roomName(rooms, item.kamar_id)} - WA {item.no_wa || '-'}</Text>
+      {hasDebtAfterExit ? (
+        <View style={styles.noticeMini}>
+          <Text style={styles.noticeMiniText}>Sudah keluar, tapi masih ada pembayaran yang harus diselesaikan.</Text>
+        </View>
+      ) : null}
+      <Text style={styles.muted}>Kamar terakhir {roomName(rooms, item.kamar_id)} - WA {item.no_wa || '-'}</Text>
       <Text style={styles.muted}>Masuk {item.tanggal_masuk || '-'} - {paymentLabel}</Text>
       {latestBill ? <Text style={styles.muted}>Tagihan terakhir: {monthName(latestBill.bulan)} {latestBill.tahun} - {billStatusLabel(latestBill.status)}</Text> : null}
-      {openBills > 0 || verifyBills > 0 || item.akan_jatuh_tempo ? (
+      {openBills > 0 || verifyBills > 0 || item.akan_jatuh_tempo || isExited ? (
         <View style={styles.badgeRow}>
+          {isExited ? <Text style={styles.exitBadge}>Sudah keluar</Text> : null}
           {verifyBills > 0 ? <Text style={styles.verifyBadge}>Perlu cek bukti</Text> : null}
-          {openBills > 0 ? <Text style={styles.billBadge}>{money(item.tagihan_aktif_nominal)}</Text> : null}
+          {openBills > 0 ? <Text style={styles.billBadge}>{hasDebtAfterExit ? `Tunggakan ${money(item.tagihan_aktif_nominal)}` : money(item.tagihan_aktif_nominal)}</Text> : null}
           {item.akan_jatuh_tempo ? <Text style={styles.dueBadge}>Akan jatuh tempo</Text> : null}
         </View>
       ) : null}
@@ -2646,6 +2678,9 @@ const styles = StyleSheet.create({
   billBadge: { overflow: 'hidden', borderRadius: 999, backgroundColor: '#fff8e8', color: '#8a5b00', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontWeight: '800', fontSize: 12 },
   verifyBadge: { overflow: 'hidden', borderRadius: 999, backgroundColor: '#e8f7ef', color: colors.success, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontWeight: '800', fontSize: 12 },
   dueBadge: { overflow: 'hidden', borderRadius: 999, backgroundColor: '#eef2ff', color: '#3f4f9f', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontWeight: '800', fontSize: 12 },
+  exitBadge: { overflow: 'hidden', borderRadius: 999, backgroundColor: '#eef1f5', color: colors.muted, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontWeight: '800', fontSize: 12 },
+  noticeMini: { borderRadius: 14, backgroundColor: '#fff8e8', borderWidth: 1, borderColor: '#f4c76b', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginTop: spacing.xs, marginBottom: spacing.xs },
+  noticeMiniText: { color: '#8a5b00', fontSize: 12, fontWeight: '800', lineHeight: 18 },
   billMiniCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.sm },
   proofThumbRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   proofThumb: { width: 58, height: 58, borderRadius: 12, backgroundColor: colors.surfaceAlt },
