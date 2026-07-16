@@ -561,6 +561,21 @@ export default function App() {
   async function payMultiMonth() {
     if (!multiPayForm.kamar_id) return Alert.alert('Pilih kamar', 'Pilih kamar penghuni yang membayar.');
     if (!multiPayForm.jumlah_bulan || Number(multiPayForm.jumlah_bulan) < 1) return Alert.alert('Jumlah bulan belum valid', 'Isi 2, 3, atau jumlah bulan lain.');
+    const jumlahBulan = Number(multiPayForm.jumlah_bulan);
+    const mulaiBulan = monthOptions.find((item) => item.value === String(multiPayForm.bulan))?.label || `Bulan ${multiPayForm.bulan}`;
+    const targetName = multiPayContext?.nama_lengkap || `Kamar ${roomName(rooms, multiPayForm.kamar_id)}`;
+    const metodeBayar = multiPayContext ? 'tunai' : multiPayForm.metode_pembayaran;
+    Alert.alert(
+      metodeBayar === 'tunai' ? 'Catat bayar tunai?' : 'Catat pembayaran?',
+      `${targetName}\nMulai ${mulaiBulan} ${multiPayForm.tahun}\nJumlah ${jumlahBulan} bulan\nTanggal bayar ${formatDate(multiPayForm.tanggal_bayar)}\nMetode ${paymentMethodLabel(metodeBayar)}\n\nPastikan pembayaran sudah diterima sebelum melanjutkan.`,
+      [
+        { text: 'Cek lagi', style: 'cancel' },
+        { text: 'Ya, Catat Bayar', onPress: () => submitMultiMonthPayment(jumlahBulan, metodeBayar) },
+      ],
+    );
+  }
+
+  async function submitMultiMonthPayment(jumlahBulan, metodeBayar) {
     await submit(async () => {
       const response = await api('/tagihan/bayar-multi', {
         method: 'POST',
@@ -569,9 +584,9 @@ export default function App() {
           kamar_id: Number(multiPayForm.kamar_id),
           bulan: Number(multiPayForm.bulan),
           tahun: Number(multiPayForm.tahun),
-          jumlah_bulan: Number(multiPayForm.jumlah_bulan),
+          jumlah_bulan: jumlahBulan,
           tanggal_bayar: multiPayForm.tanggal_bayar,
-          metode_pembayaran: multiPayForm.metode_pembayaran,
+          metode_pembayaran: metodeBayar,
           penghuni_id: multiPayForm.penghuni_id ? Number(multiPayForm.penghuni_id) : undefined,
         },
       });
@@ -1401,8 +1416,17 @@ function MultiPayModal({ visible, form, setForm, rooms, occupant, onSave, onClos
       <MonthYearPicker month={form.bulan} year={form.tahun} onChange={(next) => setForm({ ...form, ...next })} monthLabel="Mulai bulan" />
       <StepperPicker label="Jumlah bulan dibayar" value={form.jumlah_bulan} min={1} max={12} onChange={(jumlah_bulan) => setForm({ ...form, jumlah_bulan })} helperText="Contoh: pilih 2 jika penghuni membayar bulan ini dan bulan berikutnya sekaligus." />
       <CompactDatePicker label="Tanggal bayar" value={form.tanggal_bayar} onChange={(tanggal_bayar) => setForm({ ...form, tanggal_bayar })} />
-      <Text style={styles.label}>Metode pembayaran</Text>
-      <OptionGrid items={paymentOptionRows} value={form.metode_pembayaran} onChange={(metode_pembayaran) => setForm({ ...form, metode_pembayaran })} />
+      {locked ? (
+        <View style={styles.lockedInfo}>
+          <Text style={styles.lockedTitle}>Bayar tunai</Text>
+          <Text style={styles.muted}>Metode ini sudah tetap karena pemilik mencatat pembayaran langsung dari penghuni.</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.label}>Metode pembayaran</Text>
+          <OptionGrid items={paymentOptionRows} value={form.metode_pembayaran} onChange={(metode_pembayaran) => setForm({ ...form, metode_pembayaran })} />
+        </>
+      )}
       <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle="Catat Bayar" />
     </BaseModal>
   );
@@ -1706,6 +1730,10 @@ const paymentOptionRows = [
   { value: 'transfer', label: 'Transfer' },
   { value: 'qris', label: 'QRIS' },
 ];
+
+function paymentMethodLabel(value) {
+  return paymentOptionRows.find((item) => item.value === value)?.label || value || '-';
+}
 
 function Shell({ children }) {
   return (
@@ -2186,6 +2214,11 @@ function yes(value) {
 
 function monthName(value) {
   return ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][Number(value || 1) - 1] || value;
+}
+
+function formatDate(value) {
+  const [year, month, day] = String(value || today()).split('-');
+  return `${Number(day)} ${monthName(month)} ${year}`;
 }
 
 function dateParts(value) {
