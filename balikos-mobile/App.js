@@ -1152,11 +1152,11 @@ function RoomsScreen({ rooms, apiBase, openRoomDetail, openRoomModal }) {
   );
 }
 
-function MiniSummary({ label, value }) {
+function MiniSummary({ label, value, compact = false }) {
   return (
-    <View style={styles.miniSummary}>
+    <View style={[styles.miniSummary, compact && styles.miniSummaryCompact]}>
       <Text style={styles.miniSummaryValue}>{value}</Text>
-      <Text style={styles.miniSummaryLabel}>{label}</Text>
+      <Text style={styles.miniSummaryLabel} numberOfLines={2}>{label}</Text>
     </View>
   );
 }
@@ -1203,18 +1203,18 @@ function OccupantsScreen({ occupants, rooms, bills, openOccupantModal, openOccup
   return (
     <>
       <HeaderAction title="Penghuni & Pembayaran" action="+ Penghuni" onPress={() => openOccupantModal()} />
-      <View style={styles.roomSummaryRow}>
-        <MiniSummary label="Aktif" value={activeCount} />
-        <MiniSummary label="Belum Bayar" value={unpaidCount} />
-        <MiniSummary label="Perlu Cek" value={verifyCount} />
-        <MiniSummary label="Keluar Nunggak" value={exitedDebtCount} />
+      <View style={styles.occupantSummaryGrid}>
+        <MiniSummary label="Aktif" value={activeCount} compact />
+        <MiniSummary label="Belum bayar" value={unpaidCount} compact />
+        <MiniSummary label="Perlu cek" value={verifyCount} compact />
+        <MiniSummary label="Keluar nunggak" value={exitedDebtCount} compact />
       </View>
       <View style={styles.compactActionPanel}>
-        <Text style={styles.cardTitle}>Alur simpel</Text>
-        <Text style={styles.helperText}>Klik nama penghuni untuk verifikasi bukti, bayar tunai, buat tagihan jatuh tempo, atau share portal. Penghuni keluar yang masih punya tunggakan tetap muncul sampai pembayaran selesai.</Text>
+        <Text style={styles.cardTitle}>Alur pembayaran</Text>
+        <Text style={styles.helperText}>Klik penghuni untuk cek tagihan, catat bayar tunai, verifikasi bukti, atau share portal. Penghuni keluar yang masih nunggak tetap muncul di sini.</Text>
         {dueSoonCount > 0 ? <SecondaryButton title={`Buat ${dueSoonCount} Tagihan 7 Hari Ini`} onPress={autoGenerateBills} style={{ marginTop: spacing.sm }} /> : null}
       </View>
-      <Segment items={['semua', 'tagihan', 'verifikasi', 'jatuh_tempo', 'keluar']} labels={{ semua: 'Aktif+', tagihan: 'Belum bayar', verifikasi: 'Perlu cek', jatuh_tempo: 'Jatuh tempo', keluar: 'Keluar' }} value={filter} onChange={setFilter} />
+      <FilterChips items={['semua', 'tagihan', 'verifikasi', 'jatuh_tempo', 'keluar']} labels={{ semua: 'Aktif+', tagihan: 'Belum bayar', verifikasi: 'Perlu cek', jatuh_tempo: 'Jatuh tempo', keluar: 'Keluar' }} value={filter} onChange={setFilter} />
       <FormField label="Cari penghuni" value={search} onChangeText={setSearch} placeholder="Nama, kamar, WA, kendaraan" />
       {filteredOccupants.map((item) => <OccupantCard key={item.id} item={item} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(item.id))} rooms={rooms} onPress={() => openOccupantDetail(item)} />)}
       {occupants.length === 0 ? <Empty text="Belum ada penghuni." /> : null}
@@ -2384,6 +2384,21 @@ function Segment({ items, labels = {}, value, onChange }) {
   return <View style={styles.segment}>{items.map((item) => <Pressable key={item} onPress={() => onChange(item)} style={[styles.segmentItem, value === item && styles.segmentActive]}><Text style={[styles.segmentText, value === item && styles.segmentTextActive]}>{labels[item] || item}</Text></Pressable>)}</View>;
 }
 
+function FilterChips({ items, labels = {}, value, onChange }) {
+  return (
+    <View style={styles.filterChipWrap}>
+      {items.map((item) => {
+        const active = value === item;
+        return (
+          <Pressable key={item} onPress={() => onChange(item)} style={({ pressed }) => [styles.filterChip, active && styles.filterChipActive, pressed && styles.pressed]}>
+            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{labels[item] || item}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function OptionGrid({ items, value, onChange, emptyText = 'Tidak ada pilihan.' }) {
   if (!items.length) return <Empty text={emptyText} />;
   return <View style={styles.optionGrid}>{items.map((item, index) => <Pressable key={`${item.value || 'all'}-${index}`} onPress={() => onChange(item.value)} style={[styles.option, value === item.value && styles.optionActive]}><Text style={[styles.optionText, value === item.value && styles.optionTextActive]}>{item.label}</Text></Pressable>)}</View>;
@@ -2646,8 +2661,8 @@ const styles = StyleSheet.create({
   actionTitlePrimary: { color: colors.white },
   actionDescription: { color: colors.muted, lineHeight: 21 },
   actionDescriptionPrimary: { color: colors.white },
-  compactActionPanel: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.md },
-  helperText: { color: colors.muted, lineHeight: 20, fontSize: 12, marginTop: spacing.sm },
+  compactActionPanel: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.md },
+  helperText: { color: colors.muted, lineHeight: 19, fontSize: 12, marginTop: spacing.xs },
   lockedInfo: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
   lockedTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: 4 },
   helpHero: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginBottom: spacing.md },
@@ -2685,9 +2700,11 @@ const styles = StyleSheet.create({
   proofThumbRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   proofThumb: { width: 58, height: 58, borderRadius: 12, backgroundColor: colors.surfaceAlt },
   roomSummaryRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  occupantSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
   miniSummary: { flex: 1, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: spacing.sm, alignItems: 'center' },
+  miniSummaryCompact: { width: '48%', flex: 0, minHeight: 74, justifyContent: 'center' },
   miniSummaryValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  miniSummaryLabel: { color: colors.muted, fontSize: 12, fontWeight: '800', marginTop: 2 },
+  miniSummaryLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', marginTop: 2, textAlign: 'center', lineHeight: 14 },
   facilityChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   facilityChip: { overflow: 'hidden', borderRadius: 999, backgroundColor: colors.surfaceAlt, color: colors.goldLight, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontWeight: '800' },
   facilityChipSmall: { overflow: 'hidden', borderRadius: 999, backgroundColor: colors.surfaceAlt, color: colors.goldLight, paddingHorizontal: spacing.sm, paddingVertical: 4, fontWeight: '800', fontSize: 12 },
@@ -2752,6 +2769,11 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.gold },
   segmentText: { color: colors.muted, fontWeight: '700', textTransform: 'capitalize', fontSize: 12 },
   segmentTextActive: { color: colors.white },
+  filterChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+  filterChip: { minHeight: 38, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: spacing.md, alignItems: 'center', justifyContent: 'center' },
+  filterChipActive: { backgroundColor: colors.gold, borderColor: colors.gold },
+  filterChipText: { color: colors.muted, fontWeight: '800', fontSize: 12 },
+  filterChipTextActive: { color: colors.white },
   kosPills: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
   kosPill: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   kosPillActive: { backgroundColor: colors.gold, borderColor: colors.gold },
