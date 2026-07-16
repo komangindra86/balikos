@@ -540,7 +540,7 @@ export default function App() {
 
   async function saveOccupant() {
     if (!activeKosId) return Alert.alert('Pilih kos', 'Pilih kos aktif terlebih dahulu.');
-    if (!occupantForm.kamar_id) return Alert.alert('Pilih kamar', 'Pilih kamar kosong untuk penghuni ini.');
+    if (!occupantForm.kamar_id) return Alert.alert('Pilih kamar', occupantForm.id ? 'Data kamar penghuni tidak ditemukan.' : 'Pilih kamar kosong untuk penghuni ini.');
     if (!occupantForm.nama_lengkap.trim()) return Alert.alert('Nama penghuni wajib diisi', 'Isi nama lengkap penghuni.');
     if (!occupantForm.tanggal_masuk.trim()) return Alert.alert('Tanggal masuk wajib diisi', 'Pilih tanggal masuk penghuni.');
     await submit(async () => {
@@ -1515,15 +1515,21 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
 
 function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase, onPickKtp, onSave, onClose, loading }) {
   const isEdit = Boolean(form.id);
-  const availableRooms = isEdit
-    ? rooms.filter((room) => room.status === 'kosong' || String(room.id) === String(form.kamar_id))
-    : emptyRooms;
   const ktpUri = form.foto_ktp?.uri || (form.existing_foto_ktp ? storageUrl(form.existing_foto_ktp, apiBase) : null);
   return (
     <BaseModal visible={visible} title={isEdit ? 'Edit Penghuni' : 'Tambah Penghuni'} onClose={onClose}>
-      <Text style={styles.muted}>{isEdit ? 'Perbaiki data penghuni jika ada salah input. Jika pindah kamar, pilih kamar kosong yang baru.' : 'Pilih kamar kosong, lalu isi data utama penghuni.'}</Text>
-      <Text style={styles.label}>{isEdit ? 'Kamar penghuni' : 'Kamar kosong'}</Text>
-      <OptionGrid items={availableRooms.map((room) => ({ value: String(room.id), label: `Kamar ${room.nomor_kamar}` }))} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
+      <Text style={styles.muted}>{isEdit ? 'Perbaiki data penghuni jika ada salah input. Kamar tidak ikut diubah dari form ini.' : 'Pilih kamar kosong, lalu isi data utama penghuni.'}</Text>
+      {isEdit ? (
+        <View style={styles.lockedInfo}>
+          <Text style={styles.lockedTitle}>Kamar {roomName(rooms, form.kamar_id)}</Text>
+          <Text style={styles.muted}>Data kamar tetap. Untuk mengosongkan kamar, gunakan tombol Keluarkan Penghuni.</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.label}>Kamar kosong</Text>
+          <OptionGrid items={emptyRooms.map((room) => ({ value: String(room.id), label: `Kamar ${room.nomor_kamar}` }))} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
+        </>
+      )}
       <FormField label="Nama lengkap" value={form.nama_lengkap} onChangeText={(v) => setForm({ ...form, nama_lengkap: v })} />
       <FormField label="Nomor WhatsApp" value={form.no_wa} onChangeText={(v) => setForm({ ...form, no_wa: v })} keyboardType="phone-pad" />
       <FormField label="Nomor KTP" value={form.no_ktp} onChangeText={(v) => setForm({ ...form, no_ktp: v })} />
