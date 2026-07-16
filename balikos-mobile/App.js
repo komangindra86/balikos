@@ -952,6 +952,7 @@ export default function App() {
             <Text style={styles.eyebrow}>BALIKOS</Text>
             <Text style={styles.headerTitle}>{activeKos?.nama_kos || 'Pemilik Kos'}</Text>
           </View>
+          <SecondaryButton title="Edit" onPress={openKosEditModal} style={styles.headerEditButton} />
         </View>
       </LinearGradient>
       <ScrollView
@@ -2647,6 +2648,7 @@ const styles = StyleSheet.create({
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   headerLogo: { width: 58, height: 58, borderRadius: 16 },
   headerTitle: { color: colors.text, fontSize: 24, fontWeight: '800', marginTop: 4 },
+  headerEditButton: { minHeight: 40, paddingHorizontal: spacing.md, borderRadius: 14, backgroundColor: colors.surface },
   sectionTitle: { color: colors.text, fontSize: 20, fontWeight: '800', marginTop: spacing.md, marginBottom: spacing.sm },
   titleWithInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
   infoButton: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: colors.gold, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center', marginTop: spacing.sm },
