@@ -292,13 +292,17 @@ class BalikosApiController extends Controller
         $data = $request->validate($this->kamarRules());
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
         $data = $this->booleanize($data, $this->facilityFields());
-        unset($data['fotos'], $data['hapus_foto_ids']);
+        unset($data['foto'], $data['fotos'], $data['hapus_foto_ids']);
         $data['created_at'] = now();
         $data['updated_at'] = now();
 
-        $id = DB::table('kamars')->insertGetId($data);
-        $this->storeRoomPhotos($request, $id);
-        $this->syncPrimaryRoomPhoto($id);
+        $id = DB::transaction(function () use ($request, $data) {
+            $id = DB::table('kamars')->insertGetId($data);
+            $this->storeRoomPhotos($request, $id);
+            $this->syncPrimaryRoomPhoto($id);
+
+            return $id;
+        });
 
         return response()->json(['message' => 'Kamar berhasil dibuat.', 'data' => $this->roomWithPhotos($this->ownedRow($request, 'kamars', $id))], 201);
     }
@@ -328,7 +332,7 @@ class BalikosApiController extends Controller
         $data = $this->booleanize($data, $this->facilityFields());
 
         $deletedPhotoIds = collect($data['hapus_foto_ids'] ?? [])->map(fn ($value) => (int) $value)->filter()->values();
-        unset($data['fotos'], $data['hapus_foto_ids']);
+        unset($data['foto'], $data['fotos'], $data['hapus_foto_ids']);
 
         if ($deletedPhotoIds->isNotEmpty()) {
             $deleted = DB::table('kamar_fotos')
