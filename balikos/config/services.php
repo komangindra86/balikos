@@ -40,4 +40,10 @@ return [
         'web_client_id' => env('GOOGLE_WEB_CLIENT_ID'),
     ],
 
+    'xendit' => [
+        'secret_key' => env('XENDIT_SECRET_KEY'),
+        'mode' => env('XENDIT_MODE', 'production'),
+        'webhook_token' => env('XENDIT_WEBHOOK_TOKEN'),
+    ],
+
 ];
