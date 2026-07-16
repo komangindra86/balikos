@@ -224,7 +224,11 @@ class BalikosApiController extends Controller
                 'kamar_kosong' => DB::table('kamars')->whereIn('kos_id', $kosIds)->where('status', 'kosong')->count(),
                 'kamar_maintenance' => DB::table('kamars')->whereIn('kos_id', $kosIds)->where('status', 'maintenance')->count(),
                 'penghuni_aktif' => DB::table('penghunis')->whereIn('kos_id', $kosIds)->where('status', 'aktif')->count(),
-                'tagihan_belum_lunas' => DB::table('tagihans')->whereIn('kos_id', $kosIds)->whereIn('status', ['belum_lunas', 'terlambat'])->sum('nominal'),
+                'tagihan_belum_lunas' => DB::table('tagihans')
+                    ->whereIn('kos_id', $kosIds)
+                    ->whereIn('status', ['belum_lunas', 'terlambat'])
+                    ->selectRaw('COALESCE(SUM(CASE WHEN nominal > nominal_terbayar THEN nominal - nominal_terbayar ELSE 0 END), 0) as total')
+                    ->value('total'),
                 'tagihan_menunggu_verifikasi' => DB::table('tagihans')->whereIn('kos_id', $kosIds)->where('status', 'menunggu_verifikasi')->count(),
                 'okupansi' => $totalKamar > 0 ? round(($kamarTerisi / $totalKamar) * 100, 1) : 0,
             ],
@@ -372,7 +376,7 @@ class BalikosApiController extends Controller
             ->select(
                 'penghuni_id',
                 DB::raw("SUM(CASE WHEN status IN ('belum_lunas', 'terlambat', 'ditolak') THEN 1 ELSE 0 END) as tagihan_aktif_count"),
-                DB::raw("SUM(CASE WHEN status IN ('belum_lunas', 'terlambat', 'ditolak') THEN nominal ELSE 0 END) as tagihan_aktif_nominal"),
+                DB::raw("SUM(CASE WHEN status IN ('belum_lunas', 'terlambat', 'ditolak') THEN CASE WHEN nominal > nominal_terbayar THEN nominal - nominal_terbayar ELSE 0 END ELSE 0 END) as tagihan_aktif_nominal"),
                 DB::raw("SUM(CASE WHEN status = 'menunggu_verifikasi' THEN 1 ELSE 0 END) as tagihan_verifikasi_count")
             )
             ->whereIn('penghuni_id', $rows->pluck('id'))
@@ -408,6 +412,9 @@ class BalikosApiController extends Controller
     public function penghuniStore(Request $request)
     {
         $data = $request->validate($this->penghuniRules());
+        $initialPayment = $data['pembayaran_awal'] ?? 'belum_bayar';
+        $initialPaidAmount = (int) ($data['nominal_pembayaran_awal'] ?? 0);
+        unset($data['pembayaran_awal'], $data['nominal_pembayaran_awal']);
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
         $this->assertOwnedKamarId($request, (int) $data['kamar_id'], (int) $data['kos_id']);
         if ($data['status'] === 'aktif') {
@@ -419,10 +426,15 @@ class BalikosApiController extends Controller
         $data['created_at'] = now();
         $data['updated_at'] = now();
 
-        $id = DB::table('penghunis')->insertGetId($data);
-        if ($data['status'] === 'aktif') {
-            DB::table('kamars')->where('id', $data['kamar_id'])->update(['status' => 'terisi', 'updated_at' => now()]);
-        }
+        $id = DB::transaction(function () use ($data, $initialPayment, $initialPaidAmount) {
+            $id = DB::table('penghunis')->insertGetId($data);
+            if ($data['status'] === 'aktif') {
+                DB::table('kamars')->where('id', $data['kamar_id'])->update(['status' => 'terisi', 'updated_at' => now()]);
+                $this->createInitialOccupantBill($id, $initialPayment, $initialPaidAmount);
+            }
+
+            return $id;
+        });
 
         return response()->json(['message' => 'Penghuni berhasil dibuat.', 'data' => $this->ownedRow($request, 'penghunis', $id)], 201);
     }
@@ -436,6 +448,7 @@ class BalikosApiController extends Controller
     {
         $row = $this->ownedRow($request, 'penghunis', $id);
         $data = $request->validate($this->penghuniRules(false));
+        unset($data['pembayaran_awal'], $data['nominal_pembayaran_awal']);
         $data['kos_id'] = $data['kos_id'] ?? $row->kos_id;
         $data['kamar_id'] = $data['kamar_id'] ?? $row->kamar_id;
         $data['status'] = $data['status'] ?? $row->status;
@@ -691,6 +704,7 @@ class BalikosApiController extends Controller
             'status' => 'lunas',
             'tanggal_bayar' => $data['tanggal_bayar'] ?? now()->toDateString(),
             'metode_pembayaran' => $data['metode_pembayaran'] ?? 'tunai',
+            'nominal_terbayar' => DB::raw('nominal'),
             'tanggal_verifikasi' => now(),
             'diverifikasi_oleh' => $this->user($request)->id,
             'updated_at' => now(),
@@ -733,6 +747,7 @@ class BalikosApiController extends Controller
                 'status' => 'lunas',
                 'tanggal_bayar' => $request->input('tanggal_bayar', now()->toDateString()),
                 'metode_pembayaran' => $method,
+                'nominal_terbayar' => (int) $bill->nominal,
                 'biaya_platform' => $fee,
                 'total_dibayar' => (int) $bill->nominal + $fee,
                 'tanggal_verifikasi' => now(),
@@ -764,6 +779,7 @@ class BalikosApiController extends Controller
                 'tanggal_verifikasi' => now(),
                 'tanggal_bayar' => now()->toDateString(),
                 'metode_pembayaran' => $method,
+                'nominal_terbayar' => (int) $bill->nominal,
                 'biaya_platform' => $fee,
                 'total_dibayar' => (int) $bill->nominal + $fee,
                 'diverifikasi_oleh' => $this->user($request)->id,
@@ -1308,12 +1324,16 @@ class BalikosApiController extends Controller
             $row->bukti_pembayaran_url = asset('storage/'.$row->bukti_pembayaran);
         }
         if ($row) {
+            $row->nominal_terbayar = (int) ($row->nominal_terbayar ?? ($row->status === 'lunas' ? $row->nominal : 0));
+            $row->sisa_tagihan = max(0, (int) $row->nominal - (int) $row->nominal_terbayar);
             $fee = (int) ($row->biaya_platform ?? 0);
             if ($fee === 0 && $this->activeQrisMethod((int) $row->kos_id) && in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak', 'menunggu_verifikasi'], true)) {
-                $fee = $this->qrisFee((int) $row->nominal);
+                $fee = $this->qrisFee((int) $row->sisa_tagihan);
             }
             $row->biaya_platform = $fee;
-            $row->total_dibayar = (int) ($row->total_dibayar ?? ((int) $row->nominal + $fee));
+            $row->total_dibayar = in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak', 'menunggu_verifikasi'], true)
+                ? (int) $row->sisa_tagihan + $fee
+                : (int) ($row->total_dibayar ?? ((int) $row->nominal + $fee));
         }
 
         return $row;
@@ -1394,6 +1414,8 @@ class BalikosApiController extends Controller
             'jatuh_tempo_hari' => ['nullable', 'integer', 'between:1,28'],
             'tanggal_keluar' => ['nullable', 'date'],
             'status' => [...$base, Rule::in(['aktif', 'keluar'])],
+            'pembayaran_awal' => ['nullable', Rule::in(['belum_bayar', 'dp', 'lunas'])],
+            'nominal_pembayaran_awal' => ['nullable', 'integer', 'min:0'],
         ];
     }
 
@@ -1478,8 +1500,9 @@ class BalikosApiController extends Controller
     private function creditQrisPayment(object $bill): void
     {
         $wallet = $this->walletForKos((int) $bill->kos_id);
+        $amount = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
         DB::table('kos_wallets')->where('id', $wallet->id)->update([
-            'saldo_tersedia' => DB::raw('saldo_tersedia + '.(int) $bill->nominal),
+            'saldo_tersedia' => DB::raw('saldo_tersedia + '.$amount),
             'updated_at' => now(),
         ]);
     }
@@ -1543,13 +1566,59 @@ class BalikosApiController extends Controller
         return ['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'];
     }
 
+    private function createInitialOccupantBill(int $penghuniId, string $paymentStatus, int $paidAmount): void
+    {
+        $penghuni = DB::table('penghunis')
+            ->join('kamars', 'kamars.id', '=', 'penghunis.kamar_id')
+            ->where('penghunis.id', $penghuniId)
+            ->select('penghunis.*', 'kamars.harga_bulanan')
+            ->first();
+
+        if (! $penghuni) {
+            return;
+        }
+
+        $period = \Illuminate\Support\Carbon::parse($penghuni->tanggal_masuk)->startOfMonth();
+        $nominal = (int) $penghuni->harga_bulanan;
+        $paid = match ($paymentStatus) {
+            'lunas' => $nominal,
+            'dp' => min($nominal, max(0, $paidAmount)),
+            default => 0,
+        };
+        $remaining = max(0, $nominal - $paid);
+        $fee = $remaining > 0 && $this->activeQrisMethod((int) $penghuni->kos_id) ? $this->qrisFee($remaining) : 0;
+
+        DB::table('tagihans')->updateOrInsert(
+            [
+                'penghuni_id' => $penghuni->id,
+                'bulan' => (int) $period->month,
+                'tahun' => (int) $period->year,
+            ],
+            [
+                'kos_id' => $penghuni->kos_id,
+                'kamar_id' => $penghuni->kamar_id,
+                'nominal' => $nominal,
+                'nominal_terbayar' => $paid,
+                'biaya_platform' => $fee,
+                'total_dibayar' => $remaining + $fee,
+                'tanggal_jatuh_tempo' => $this->dueDateForPenghuni($penghuni, (int) $period->month, (int) $period->year),
+                'tanggal_bayar' => $paid > 0 ? $penghuni->tanggal_masuk : null,
+                'status' => $remaining === 0 ? 'lunas' : 'belum_lunas',
+                'metode_pembayaran' => $paid > 0 ? ($paymentStatus === 'dp' ? 'dp' : 'tunai') : null,
+                'tanggal_verifikasi' => $remaining === 0 ? now() : null,
+                'catatan' => $paid > 0 && $remaining > 0 ? 'DP masuk kamar: Rp '.number_format($paid, 0, ',', '.') : null,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]
+        );
+    }
+
     private function createBills($penghunis, int $bulan, int $tahun, ?string $tanggalJatuhTempo): int
     {
         $total = 0;
 
         foreach ($penghunis as $penghuni) {
             $dueDate = $tanggalJatuhTempo ?? $this->dueDateForPenghuni($penghuni, $bulan, $tahun);
-            $fee = $this->activeQrisMethod((int) $penghuni->kos_id) ? $this->qrisFee((int) $penghuni->harga_bulanan) : 0;
             $existing = DB::table('tagihans')
                 ->where('penghuni_id', $penghuni->penghuni_id)
                 ->where('bulan', $bulan)
@@ -1557,14 +1626,18 @@ class BalikosApiController extends Controller
                 ->first();
 
             if ($existing) {
+                $paid = (int) ($existing->nominal_terbayar ?? 0);
+                $remaining = max(0, (int) $penghuni->harga_bulanan - $paid);
+                $fee = $remaining > 0 && $this->activeQrisMethod((int) $penghuni->kos_id) ? $this->qrisFee($remaining) : 0;
                 DB::table('tagihans')->where('id', $existing->id)->update([
                     'nominal' => $penghuni->harga_bulanan,
                     'biaya_platform' => $fee,
-                    'total_dibayar' => (int) $penghuni->harga_bulanan + $fee,
+                    'total_dibayar' => $remaining + $fee,
                     'tanggal_jatuh_tempo' => $dueDate,
                     'updated_at' => now(),
                 ]);
             } else {
+                $fee = $this->activeQrisMethod((int) $penghuni->kos_id) ? $this->qrisFee((int) $penghuni->harga_bulanan) : 0;
                 DB::table('tagihans')->insert([
                     'penghuni_id' => $penghuni->penghuni_id,
                     'bulan' => $bulan,
@@ -1572,6 +1645,7 @@ class BalikosApiController extends Controller
                     'kos_id' => $penghuni->kos_id,
                     'kamar_id' => $penghuni->kamar_id,
                     'nominal' => $penghuni->harga_bulanan,
+                    'nominal_terbayar' => 0,
                     'biaya_platform' => $fee,
                     'total_dibayar' => (int) $penghuni->harga_bulanan + $fee,
                     'tanggal_jatuh_tempo' => $dueDate,

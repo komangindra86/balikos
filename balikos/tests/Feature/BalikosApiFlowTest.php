@@ -225,6 +225,69 @@ class BalikosApiFlowTest extends TestCase
         ])->assertCreated()->assertJsonPath('data.judul', 'Info Test');
     }
 
+    public function test_new_occupant_initial_payment_creates_first_bill(): void
+    {
+        $login = $this->postJson('/api/balikos/login', [
+            'email' => 'pemilik@balikos.test',
+            'password' => 'password',
+            'device_name' => 'feature-test',
+        ])->assertOk()->json();
+
+        $token = $login['token'];
+        $kosId = DB::table('kos')->where('owner_id', $login['user']['id'])->value('id');
+
+        $room = $this->withToken($token)->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'DP-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Test',
+            'harga_bulanan' => 1000000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+
+        $dpOccupant = $this->withToken($token)->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'nama_lengkap' => 'Penghuni DP Test',
+            'tanggal_masuk' => '2026-07-16',
+            'status' => 'aktif',
+            'pembayaran_awal' => 'dp',
+            'nominal_pembayaran_awal' => 300000,
+        ])->assertCreated()->json('data');
+
+        $dpBill = DB::table('tagihans')->where('penghuni_id', $dpOccupant['id'])->first();
+        $this->assertSame(1000000, (int) $dpBill->nominal);
+        $this->assertSame(300000, (int) $dpBill->nominal_terbayar);
+        $this->assertSame('belum_lunas', $dpBill->status);
+
+        $this->withToken($token)->getJson('/api/balikos/penghuni?kos_id='.$kosId)
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $dpOccupant['id'],
+                'tagihan_aktif_nominal' => 700000,
+            ]);
+
+        $lunasRoom = $this->withToken($token)->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'LUNAS-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Test',
+            'harga_bulanan' => 900000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+
+        $lunasOccupant = $this->withToken($token)->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kosId,
+            'kamar_id' => $lunasRoom['id'],
+            'nama_lengkap' => 'Penghuni Lunas Test',
+            'tanggal_masuk' => '2026-07-16',
+            'status' => 'aktif',
+            'pembayaran_awal' => 'lunas',
+        ])->assertCreated()->json('data');
+
+        $lunasBill = DB::table('tagihans')->where('penghuni_id', $lunasOccupant['id'])->first();
+        $this->assertSame(900000, (int) $lunasBill->nominal_terbayar);
+        $this->assertSame('lunas', $lunasBill->status);
+    }
+
     public function test_qris_verification_is_idempotent_for_wallet_credit(): void
     {
         $login = $this->postJson('/api/balikos/login', [

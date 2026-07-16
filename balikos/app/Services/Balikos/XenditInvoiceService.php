@@ -48,7 +48,7 @@ class XenditInvoiceService
             'items' => [[
                 'name' => 'Sewa kamar '.$kamar->nomor_kamar,
                 'quantity' => 1,
-                'price' => (int) $bill->nominal,
+                'price' => max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0)),
                 'category' => 'Rent',
             ], [
                 'name' => 'Biaya layanan QRIS',
@@ -154,6 +154,7 @@ class XenditInvoiceService
                     'status' => 'lunas',
                     'tanggal_bayar' => isset($payload['paid_at']) ? Carbon::parse($payload['paid_at'])->toDateString() : now()->toDateString(),
                     'metode_pembayaran' => 'qris',
+                    'nominal_terbayar' => (int) $bill->nominal,
                     'tanggal_verifikasi' => now(),
                     'tanggal_konfirmasi' => now(),
                     'alasan_penolakan' => null,
@@ -169,8 +170,9 @@ class XenditInvoiceService
 
     private function prepareBillForXendit(object $bill): object
     {
-        $fee = (int) ($bill->biaya_platform ?: $this->qrisFee((int) $bill->nominal));
-        $total = (int) ($bill->total_dibayar ?: ((int) $bill->nominal + $fee));
+        $remaining = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+        $fee = (int) ($bill->biaya_platform ?: $this->qrisFee($remaining));
+        $total = (int) ($bill->total_dibayar ?: ($remaining + $fee));
 
         if ((int) $bill->biaya_platform !== $fee || (int) ($bill->total_dibayar ?? 0) !== $total || empty($bill->gateway_reference)) {
             DB::table('tagihans')->where('id', $bill->id)->update([
@@ -203,8 +205,9 @@ class XenditInvoiceService
             $wallet = DB::table('kos_wallets')->where('id', $walletId)->lockForUpdate()->first();
         }
 
+        $amount = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
         DB::table('kos_wallets')->where('id', $wallet->id)->update([
-            'saldo_tersedia' => DB::raw('saldo_tersedia + '.(int) $bill->nominal),
+            'saldo_tersedia' => DB::raw('saldo_tersedia + '.$amount),
             'updated_at' => now(),
         ]);
     }

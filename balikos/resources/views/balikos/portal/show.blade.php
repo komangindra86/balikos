@@ -120,7 +120,13 @@
                 @if ($nextDueBill)
                     <div class="paybox">
                         <strong>Total bayar QRIS</strong>
-                        <p class="muted">Tagihan {{ $rupiah($nextDueBill->nominal) }} + biaya layanan 1% {{ $rupiah($nextDueBill->biaya_platform ?? 0) }}.</p>
+                        <p class="muted">
+                            Tagihan {{ $rupiah($nextDueBill->nominal) }}
+                            @if (($nextDueBill->nominal_terbayar ?? 0) > 0)
+                                , sudah dibayar {{ $rupiah($nextDueBill->nominal_terbayar) }}, sisa {{ $rupiah($nextDueBill->sisa_tagihan ?? max(0, $nextDueBill->nominal - $nextDueBill->nominal_terbayar)) }}
+                            @endif
+                            + biaya layanan 1% {{ $rupiah($nextDueBill->biaya_platform ?? 0) }}.
+                        </p>
                         <div class="amount">{{ $rupiah($nextDueBill->total_dibayar ?? ($nextDueBill->nominal + ($nextDueBill->biaya_platform ?? 0))) }}</div>
                     </div>
                 @endif
@@ -164,6 +170,9 @@
                         <span class="pill status-{{ $bill->status }}">{{ $statusLabels[$bill->status] ?? $bill->status }}</span>
                     </div>
                     <div class="amount">{{ $rupiah($bill->nominal) }}</div>
+                    @if (($bill->nominal_terbayar ?? 0) > 0 && $bill->status !== 'lunas')
+                        <div class="muted">Sudah dibayar {{ $rupiah($bill->nominal_terbayar) }}. Sisa tagihan {{ $rupiah($bill->sisa_tagihan ?? max(0, $bill->nominal - $bill->nominal_terbayar)) }}.</div>
+                    @endif
                     @if ($activeMethod && $isQris && in_array($bill->status, $unpaidStatuses, true))
                         <div class="muted">Biaya layanan QRIS 1%: {{ $rupiah($bill->biaya_platform ?? 0) }}</div>
                         <div class="muted"><strong>Total dibayar: {{ $rupiah($bill->total_dibayar ?? ($bill->nominal + ($bill->biaya_platform ?? 0))) }}</strong></div>

@@ -157,8 +157,10 @@ class BalikosPortalController extends Controller
         $isQris = $paymentMethods->first() && ($paymentMethods->first()->jenis === 'qris' || $paymentMethods->first()->verification_mode === 'automatic');
         if ($isQris) {
             $tagihan = $tagihan->map(function ($bill) use ($token) {
-                $bill->biaya_platform = (int) ($bill->biaya_platform ?: ceil(((int) $bill->nominal) * 0.01));
-                $bill->total_dibayar = (int) ($bill->total_dibayar ?: ((int) $bill->nominal + (int) $bill->biaya_platform));
+                $bill->nominal_terbayar = (int) ($bill->nominal_terbayar ?? 0);
+                $bill->sisa_tagihan = max(0, (int) $bill->nominal - (int) $bill->nominal_terbayar);
+                $bill->biaya_platform = (int) ($bill->biaya_platform ?: ceil(((int) $bill->sisa_tagihan) * 0.01));
+                $bill->total_dibayar = (int) ($bill->total_dibayar ?: ((int) $bill->sisa_tagihan + (int) $bill->biaya_platform));
                 $bill->qris_payment_url = route('balikos.portal.pay-qris', [$token, $bill->id]);
                 return $bill;
             });

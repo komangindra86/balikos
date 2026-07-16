@@ -78,6 +78,8 @@ const emptyOccupantForm = {
   kontak_darurat: '',
   tanggal_masuk: today(),
   status: 'aktif',
+  pembayaran_awal: 'belum_bayar',
+  nominal_pembayaran_awal: '',
 };
 const emptyBillForm = { kamar_id: '', bulan: thisMonth(), tahun: thisYear(), jumlah_bulan: '1' };
 const emptyMultiPayForm = { kamar_id: '', penghuni_id: '', bulan: thisMonth(), tahun: thisYear(), jumlah_bulan: '2', tanggal_bayar: today(), metode_pembayaran: 'tunai' };
@@ -99,6 +101,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState('dashboard');
   const [moreScreen, setMoreScreen] = useState('payment');
+  const [occupantFilter, setOccupantFilter] = useState('semua');
   const [kosList, setKosList] = useState([]);
   const [activeKosId, setActiveKosId] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -283,8 +286,12 @@ export default function App() {
   }
 
   async function loadDashboard() {
-    const response = await api(`/dashboard?kos_id=${activeKosId}`);
-    setDashboard(response.data);
+    const [dashboardResponse, occupantResponse] = await Promise.all([
+      api(`/dashboard?kos_id=${activeKosId}`),
+      api(`/penghuni?kos_id=${activeKosId}`),
+    ]);
+    setDashboard(dashboardResponse.data);
+    setOccupants(occupantResponse.data || []);
   }
 
   async function loadRooms() {
@@ -533,6 +540,8 @@ export default function App() {
       kontak_darurat: occupant.kontak_darurat || '',
       tanggal_masuk: occupant.tanggal_masuk || today(),
       status: occupant.status || 'aktif',
+      pembayaran_awal: 'belum_bayar',
+      nominal_pembayaran_awal: '',
     });
     setModal('occupant');
     if (rooms.length === 0) loadRooms();
@@ -543,6 +552,9 @@ export default function App() {
     if (!occupantForm.kamar_id) return Alert.alert('Pilih kamar', occupantForm.id ? 'Data kamar penghuni tidak ditemukan.' : 'Pilih kamar kosong untuk penghuni ini.');
     if (!occupantForm.nama_lengkap.trim()) return Alert.alert('Nama penghuni wajib diisi', 'Isi nama lengkap penghuni.');
     if (!occupantForm.tanggal_masuk.trim()) return Alert.alert('Tanggal masuk wajib diisi', 'Pilih tanggal masuk penghuni.');
+    if (!occupantForm.id && occupantForm.pembayaran_awal === 'dp' && !cleanNumber(occupantForm.nominal_pembayaran_awal)) {
+      return Alert.alert('Nominal DP wajib diisi', 'Isi nominal DP yang sudah dibayar penghuni sebelum masuk kamar.');
+    }
     await submit(async () => {
       const masuk = dateParts(occupantForm.tanggal_masuk);
       const jatuhTempoHari = Math.min(28, Math.max(1, masuk.day));
@@ -553,7 +565,8 @@ export default function App() {
       if (occupantForm.id) form.append('_method', 'PUT');
       Object.entries(occupantForm).forEach(([key, value]) => {
         if (['id', 'foto_ktp', 'existing_foto_ktp'].includes(key) || value === null || value === '') return;
-        form.append(key, String(value));
+        if (key === 'nominal_pembayaran_awal') form.append(key, cleanNumber(value));
+        else form.append(key, String(value));
       });
       if (occupantForm.foto_ktp) {
         form.append('foto_ktp', {
@@ -968,9 +981,9 @@ export default function App() {
         )}
       >
         <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={setActiveKosId} onAdd={openKosCreateModal} onEdit={openKosEditModal} />
-        {tab === 'dashboard' && <Dashboard data={dashboard} activeKos={activeKos} setTab={setTab} />}
+        {tab === 'dashboard' && <Dashboard data={dashboard} occupants={occupants} activeKos={activeKos} setTab={setTab} setOccupantFilter={setOccupantFilter} />}
         {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
-        {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
+        {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} filter={occupantFilter} setFilter={setOccupantFilter} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
         {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} downloadFinancePdf={downloadFinancePdf} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} />
@@ -1162,9 +1175,8 @@ function MiniSummary({ label, value, compact = false }) {
   );
 }
 
-function OccupantsScreen({ occupants, rooms, bills, openOccupantModal, openOccupantDetail, autoGenerateBills }) {
+function OccupantsScreen({ occupants, rooms, bills, filter, setFilter, openOccupantModal, openOccupantDetail, autoGenerateBills }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('semua');
   const keyword = search.trim().toLowerCase();
   const activeCount = occupants.filter((item) => item.status === 'aktif').length;
   const unpaidCount = occupants.filter((item) => Number(item.tagihan_aktif_count || 0) > 0).length;
@@ -1539,6 +1551,12 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
 function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase, onPickKtp, onSave, onClose, loading }) {
   const isEdit = Boolean(form.id);
   const ktpUri = form.foto_ktp?.uri || (form.existing_foto_ktp ? storageUrl(form.existing_foto_ktp, apiBase) : null);
+  const selectedRoom = rooms.find((room) => Number(room.id) === Number(form.kamar_id));
+  const isRoomLocked = !isEdit && Boolean(form.kamar_id);
+  const emptyRoomOptions = emptyRooms.map((room) => ({
+    value: String(room.id),
+    label: roomPickerLabel(room),
+  }));
   return (
     <BaseModal visible={visible} title={isEdit ? 'Edit Penghuni' : 'Tambah Penghuni'} onClose={onClose}>
       <Text style={styles.muted}>{isEdit ? 'Perbaiki data penghuni jika ada salah input. Kamar tidak ikut diubah dari form ini.' : 'Pilih kamar kosong, lalu isi data utama penghuni.'}</Text>
@@ -1547,10 +1565,15 @@ function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase,
           <Text style={styles.lockedTitle}>Kamar {roomName(rooms, form.kamar_id)}</Text>
           <Text style={styles.muted}>Data kamar tetap. Untuk mengosongkan kamar, gunakan tombol Keluarkan Penghuni.</Text>
         </View>
+      ) : isRoomLocked ? (
+        <View style={styles.lockedInfo}>
+          <Text style={styles.lockedTitle}>Kamar {selectedRoom?.nomor_kamar || form.kamar_id}</Text>
+          <Text style={styles.muted}>Penghuni akan masuk ke kamar ini. Jika ingin memilih kamar lain, buka dari menu tambah penghuni.</Text>
+        </View>
       ) : (
         <>
           <Text style={styles.label}>Kamar kosong</Text>
-          <OptionGrid items={emptyRooms.map((room) => ({ value: String(room.id), label: `Kamar ${room.nomor_kamar}` }))} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
+          <OptionGrid items={emptyRoomOptions} value={form.kamar_id} onChange={(kamar_id) => setForm({ ...form, kamar_id })} emptyText="Belum ada kamar kosong." />
         </>
       )}
       <FormField label="Nama lengkap" value={form.nama_lengkap} onChangeText={(v) => setForm({ ...form, nama_lengkap: v })} />
@@ -1560,6 +1583,17 @@ function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase,
       {ktpUri ? <Image source={{ uri: ktpUri }} style={styles.preview} /> : <View style={styles.emptyPhoto}><Text style={styles.muted}>Belum ada foto KTP dipilih.</Text></View>}
       <SecondaryButton title={form.foto_ktp ? 'Ganti Foto KTP' : 'Pilih Foto KTP'} onPress={onPickKtp} />
       <CompactDatePicker label="Tanggal masuk" value={form.tanggal_masuk} onChange={(tanggal_masuk) => setForm({ ...form, tanggal_masuk })} />
+      {!isEdit ? (
+        <>
+          <Text style={styles.label}>Pembayaran awal</Text>
+          <Segment items={['belum_bayar', 'dp', 'lunas']} labels={{ belum_bayar: 'Belum bayar', dp: 'DP', lunas: 'Lunas' }} value={form.pembayaran_awal} onChange={(pembayaran_awal) => setForm({ ...form, pembayaran_awal, nominal_pembayaran_awal: pembayaran_awal === 'dp' ? form.nominal_pembayaran_awal : '' })} />
+          {form.pembayaran_awal === 'dp' ? (
+            <FormField label="Nominal DP" value={form.nominal_pembayaran_awal} onChangeText={(v) => setForm({ ...form, nominal_pembayaran_awal: formatNumberInput(v) })} keyboardType="number-pad" helperText={form.nominal_pembayaran_awal ? `${money(form.nominal_pembayaran_awal)} akan mengurangi tagihan bulan masuk.` : 'Isi DP yang sudah diterima.'} />
+          ) : (
+            <Text style={styles.muted}>{form.pembayaran_awal === 'lunas' ? 'Tagihan bulan masuk langsung tercatat lunas.' : 'Tagihan bulan masuk otomatis dibuat sebagai tunggakan.'}</Text>
+          )}
+        </>
+      ) : null}
       <FormField label="Pekerjaan" value={form.pekerjaan} onChangeText={(v) => setForm({ ...form, pekerjaan: v })} />
       <FormField label="Alamat asal" value={form.alamat_asal} onChangeText={(v) => setForm({ ...form, alamat_asal: v })} multiline />
       <FormField label="No kendaraan" value={form.no_kendaraan} onChangeText={(v) => setForm({ ...form, no_kendaraan: v })} />
@@ -2028,7 +2062,7 @@ function RoomPhotoImage({ photo, showError = false, onFail, style }) {
   );
 }
 
-function Dashboard({ data, activeKos, setTab }) {
+function Dashboard({ data, occupants = [], activeKos, setTab, setOccupantFilter }) {
   if (!data) return <Empty text="Memuat dashboard..." />;
   const unpaidAmount = Number(data.tagihan_belum_lunas || 0);
   const waitingCount = Number(data.tagihan_menunggu_verifikasi || 0);
@@ -2037,25 +2071,37 @@ function Dashboard({ data, activeKos, setTab }) {
   const totalRooms = Number(data.total_kamar || 0);
   const occupiedRooms = Number(data.kamar_terisi || 0);
   const occupancy = Number(data.okupansi || 0);
+  const verifyOccupantCount = occupants.filter((item) => Number(item.tagihan_verifikasi_count || 0) > 0).length;
+  const unpaidOccupantCount = occupants.filter((item) => Number(item.tagihan_aktif_count || 0) > 0).length;
+  const dueSoonCount = occupants.filter((item) => item.akan_jatuh_tempo).length;
+  const openOccupants = (filter = 'semua') => {
+    setOccupantFilter?.(filter);
+    setTab('penghuni');
+  };
   const healthTitle = waitingCount > 0
     ? 'Ada pembayaran perlu dicek'
     : unpaidAmount > 0
       ? 'Masih ada tagihan belum lunas'
-      : emptyRoomCount > 0
-        ? 'Ada kamar kosong'
-        : 'Kos sedang aman';
+      : dueSoonCount > 0
+        ? 'Tagihan jatuh tempo'
+        : emptyRoomCount > 0
+          ? 'Ada kamar kosong'
+          : 'Kos sedang aman';
   const healthText = waitingCount > 0
     ? `${waitingCount} bukti bayar menunggu verifikasi. Cek dulu agar penghuni tidak menunggu.`
     : unpaidAmount > 0
       ? `${money(unpaidAmount)} belum lunas. Bagikan portal atau ingatkan penghuni.`
-      : emptyRoomCount > 0
-        ? `${emptyRoomCount} kamar kosong bisa segera diisi penghuni baru.`
-        : 'Tidak ada pekerjaan mendesak dari data saat ini.';
+      : dueSoonCount > 0
+        ? `${dueSoonCount} penghuni akan jatuh tempo. Buat tagihan agar siap dibagikan ke penghuni.`
+        : emptyRoomCount > 0
+          ? `${emptyRoomCount} kamar kosong bisa segera diisi penghuni baru.`
+          : 'Tidak ada pekerjaan mendesak dari data saat ini.';
   const tasks = [
-    waitingCount > 0 && { title: 'Verifikasi bukti bayar', text: `${waitingCount} pembayaran menunggu dicek`, tab: 'penghuni', primary: true },
-    unpaidAmount > 0 && { title: 'Tagihan belum lunas', text: money(unpaidAmount), tab: 'penghuni' },
-    emptyRoomCount > 0 && { title: 'Isi kamar kosong', text: `${emptyRoomCount} kamar siap ditawarkan`, tab: 'kamar' },
-    maintenanceCount > 0 && { title: 'Cek kamar maintenance', text: `${maintenanceCount} kamar belum bisa ditempati`, tab: 'kamar' },
+    waitingCount > 0 && { title: 'Verifikasi bukti bayar', text: `${verifyOccupantCount || waitingCount} pembayaran menunggu dicek`, onPress: () => openOccupants('verifikasi'), primary: true },
+    unpaidAmount > 0 && { title: 'Tagihan belum lunas', text: unpaidOccupantCount > 0 ? `${unpaidOccupantCount} penghuni belum lunas atau terlambat` : money(unpaidAmount), onPress: () => openOccupants('tagihan') },
+    dueSoonCount > 0 && { title: 'Tagihan jatuh tempo', text: `${dueSoonCount} penghuni akan jatuh tempo`, onPress: () => openOccupants('jatuh_tempo') },
+    emptyRoomCount > 0 && { title: 'Isi kamar kosong', text: `${emptyRoomCount} kamar siap ditawarkan`, onPress: () => setTab('kamar') },
+    maintenanceCount > 0 && { title: 'Cek kamar maintenance', text: `${maintenanceCount} kamar belum bisa ditempati`, onPress: () => setTab('kamar') },
   ].filter(Boolean);
 
   return (
@@ -2081,7 +2127,7 @@ function Dashboard({ data, activeKos, setTab }) {
           <Text style={styles.muted}>Pantau kamar, penghuni, dan pembayaran dari tombol cepat di bawah.</Text>
         </View>
       ) : tasks.map((task) => (
-        <Pressable key={task.title} onPress={() => setTab(task.tab)} style={({ pressed }) => [styles.taskCard, task.primary && styles.taskCardPrimary, pressed && styles.pressed]}>
+        <Pressable key={task.title} onPress={task.onPress} style={({ pressed }) => [styles.taskCard, task.primary && styles.taskCardPrimary, pressed && styles.pressed]}>
           <View style={styles.taskIcon}><Text style={styles.taskIconText}>{task.primary ? '!' : '>'}</Text></View>
           <View style={styles.taskBody}>
             <Text style={styles.taskTitle}>{task.title}</Text>
@@ -2094,15 +2140,15 @@ function Dashboard({ data, activeKos, setTab }) {
       <Text style={styles.sectionTitle}>Ringkasan kos</Text>
       <View style={styles.dashboardGrid}>
         <DashboardMetric label="Kamar kosong" value={emptyRoomCount} hint="Siap ditempati" onPress={() => setTab('kamar')} />
-        <DashboardMetric label="Penghuni aktif" value={data.penghuni_aktif || 0} hint="Orang tinggal" onPress={() => setTab('penghuni')} />
-        <DashboardMetric label="Belum lunas" value={money(unpaidAmount)} hint="Perlu ditagih" onPress={() => setTab('penghuni')} wide />
+        <DashboardMetric label="Penghuni aktif" value={data.penghuni_aktif || 0} hint="Orang tinggal" onPress={() => openOccupants('semua')} />
+        <DashboardMetric label="Belum lunas" value={money(unpaidAmount)} hint="Perlu ditagih" onPress={() => openOccupants('tagihan')} wide />
       </View>
 
       <Text style={styles.sectionTitle}>Tombol cepat</Text>
       <View style={styles.quickGrid}>
         <QuickAction title="Kelola Kamar" onPress={() => setTab('kamar')} />
-        <QuickAction title="Cari Penghuni" onPress={() => setTab('penghuni')} />
-        <QuickAction title="Cek Pembayaran" onPress={() => setTab('penghuni')} />
+        <QuickAction title="Cari Penghuni" onPress={() => openOccupants('semua')} />
+        <QuickAction title="Cek Pembayaran" onPress={() => openOccupants('verifikasi')} />
       </View>
     </>
   );
@@ -2252,6 +2298,8 @@ function BillCard({ bill, rooms, apiBase, updateBillStatus, openImagePreview }) 
   const hasProof = Boolean(bill.bukti_pembayaran || bill.bukti_pembayaran_url);
   const canReview = bill.status === 'menunggu_verifikasi';
   const proofUri = proofImageUrl(bill, apiBase);
+  const paid = Number(bill.nominal_terbayar || 0);
+  const remaining = Number(bill.sisa_tagihan ?? Math.max(0, Number(bill.nominal || 0) - paid));
 
   return (
     <View style={styles.card}>
@@ -2262,6 +2310,7 @@ function BillCard({ bill, rooms, apiBase, updateBillStatus, openImagePreview }) 
       <Text style={styles.muted}>Tagihan {monthName(bill.bulan)} {bill.tahun}</Text>
       <Text style={styles.muted}>Jatuh tempo {bill.tanggal_jatuh_tempo || '-'}</Text>
       <Text style={styles.money}>{money(bill.nominal)}</Text>
+      {paid > 0 && bill.status !== 'lunas' ? <Text style={styles.muted}>Sudah dibayar {money(paid)}. Sisa {money(remaining)}.</Text> : null}
       {Number(bill.biaya_platform || 0) > 0 ? <Text style={styles.muted}>Biaya QRIS 1% {money(bill.biaya_platform)} - Total {money(bill.total_dibayar)}</Text> : null}
       {hasProof ? (
         <>
@@ -2289,6 +2338,8 @@ function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview })
   const proofUri = proofImageUrl(bill, apiBase);
   const canReview = bill.status === 'menunggu_verifikasi';
   const canCashPay = billIsUnpaid(bill);
+  const paid = Number(bill.nominal_terbayar || 0);
+  const remaining = Number(bill.sisa_tagihan ?? Math.max(0, Number(bill.nominal || 0) - paid));
 
   return (
     <View style={styles.billMiniCard}>
@@ -2298,6 +2349,7 @@ function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview })
       </View>
       <Text style={styles.muted}>Jatuh tempo {bill.tanggal_jatuh_tempo || '-'}</Text>
       <Text style={styles.money}>{money(bill.nominal)}</Text>
+      {paid > 0 && bill.status !== 'lunas' ? <Text style={styles.muted}>Sudah dibayar {money(paid)}. Sisa {money(remaining)}.</Text> : null}
       {hasProof ? (
         <Pressable onPress={() => openImagePreview(proofUri)} style={({ pressed }) => [styles.proofThumbRow, pressed && styles.pressed]}>
           <Image source={{ uri: proofUri }} style={styles.proofThumb} />
@@ -2500,6 +2552,12 @@ function paymentMethodLines(item) {
 
 function roomName(rooms, id) {
   return rooms.find((room) => Number(room.id) === Number(id))?.nomor_kamar || id || '-';
+}
+
+function roomPickerLabel(room) {
+  const number = room?.nomor_kamar || room?.id || '-';
+  const price = Number(room?.harga_bulanan || 0) > 0 ? ` - ${money(room.harga_bulanan)}` : '';
+  return `Kamar ${number}${price}`;
 }
 
 function roomPhotoCacheUri(uri) {
