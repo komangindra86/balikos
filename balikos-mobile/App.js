@@ -1960,10 +1960,35 @@ function RoomCard({ room, apiBase, onPress }) {
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.rowBetween}><Text style={styles.cardTitle}>Kamar {room.nomor_kamar}</Text><Text style={[styles.badge, statusStyle(room.status)]}>{room.status}</Text></View>
       <Text style={styles.muted}>{room.tipe_kamar || '-'} - {money(room.harga_bulanan)}</Text>
-      {photo ? <RoomPhotoImage photo={photo} style={styles.roomCardImage} /> : null}
+      {photo ? <RoomCardPhoto photo={photo} /> : null}
       {labels.length ? <View style={styles.facilityChipRow}>{labels.slice(0, 4).map((label) => <Text key={label} style={styles.facilityChipSmall}>{label}</Text>)}</View> : <Text style={styles.facilities}>Belum ada fasilitas dipilih</Text>}
       <Text style={styles.linkText}>Lihat detail kamar</Text>
     </Pressable>
+  );
+}
+
+function RoomCardPhoto({ photo }) {
+  const sources = photo.sources?.length ? photo.sources : [photo.uri].filter(Boolean);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const sourceSignature = sources.join('|');
+  const uri = sources[sourceIndex];
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [sourceSignature]);
+
+  if (!uri || sourceIndex >= sources.length) {
+    return null;
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.roomCardImage}
+      resizeMode="cover"
+      fadeDuration={150}
+      onError={() => setSourceIndex((current) => current + 1)}
+    />
   );
 }
 
