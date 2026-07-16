@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -1191,7 +1191,7 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
   return (
     <>
       <Text style={styles.sectionTitle}>Menu Lainnya</Text>
-      <Segment items={['payment', 'finance', 'announcement']} labels={{ payment: 'Metode', finance: 'Keuangan', announcement: 'Info' }} value={screen} onChange={setScreen} />
+      <Segment items={['payment', 'finance', 'announcement', 'help']} labels={{ payment: 'Metode', finance: 'Keuangan', announcement: 'Info', help: 'Bantuan' }} value={screen} onChange={setScreen} />
       {screen === 'payment' && (
         <>
           <View style={styles.rowBetween}>
@@ -1229,7 +1229,50 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
           {announcements.length === 0 ? <Empty text="Belum ada pengumuman." /> : null}
         </>
       )}
+      {screen === 'help' && <HelpScreen />}
       <SecondaryButton title="Logout" onPress={logout} style={{ marginTop: spacing.lg }} />
+    </>
+  );
+}
+
+function HelpScreen() {
+  const openEmail = () => {
+    Linking.openURL('mailto:admin.balisantih@gmail.com?subject=Bantuan%20Aplikasi%20BALIKOS').catch(() => {
+      Alert.alert('Email bantuan', 'Silakan hubungi admin.balisantih@gmail.com');
+    });
+  };
+  const steps = [
+    ['1', 'Buat data kos', 'Lengkapi nama kos dan alamat. Jika punya beberapa kos, pilih kos yang ingin dikelola dari bagian atas aplikasi.'],
+    ['2', 'Tambah kamar', 'Isi nomor kamar, harga sewa, fasilitas, status kamar, dan foto kamar agar mudah dikenali.'],
+    ['3', 'Tambah penghuni', 'Masukkan penghuni ke kamar kosong. Tanggal jatuh tempo dibuat otomatis dari tanggal masuk.'],
+    ['4', 'Kelola pembayaran', 'Buka menu Penghuni untuk melihat yang belum bayar, perlu dicek, atau akan jatuh tempo. Pembayaran tunai bisa langsung dicatat dari nama penghuni.'],
+    ['5', 'Pantau keuangan', 'Di menu Keuangan, pilih bulan laporan, catat pemasukan atau pengeluaran lain, lalu download PDF jika perlu.'],
+    ['6', 'Bagikan portal penghuni', 'Gunakan link portal penghuni agar penghuni bisa melihat tagihan, info kos, dan mengirim bukti pembayaran.'],
+  ];
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Bantuan</Text>
+      <View style={styles.helpHero}>
+        <Text style={styles.helpTitle}>Panduan singkat BALIKOS</Text>
+        <Text style={styles.muted}>Ikuti alur ini agar data kos, kamar, penghuni, pembayaran, dan laporan keuangan tersusun rapi.</Text>
+      </View>
+      {steps.map(([number, title, description]) => (
+        <View key={number} style={styles.helpStep}>
+          <View style={styles.helpStepNumber}><Text style={styles.helpStepNumberText}>{number}</Text></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.helpStepTitle}>{title}</Text>
+            <Text style={styles.muted}>{description}</Text>
+          </View>
+        </View>
+      ))}
+      <View style={styles.helpContactCard}>
+        <Text style={styles.cardTitle}>Butuh bantuan?</Text>
+        <Text style={styles.muted}>Jika mengalami kendala saat memakai aplikasi, hubungi admin BALIKOS melalui email berikut.</Text>
+        <Pressable onPress={openEmail} style={({ pressed }) => [styles.emailButton, pressed && styles.pressed]}>
+          <Text style={styles.emailButtonText}>admin.balisantih@gmail.com</Text>
+        </Pressable>
+      </View>
     </>
   );
 }
@@ -2484,6 +2527,15 @@ const styles = StyleSheet.create({
   helperText: { color: colors.muted, lineHeight: 20, fontSize: 12, marginTop: spacing.sm },
   lockedInfo: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginTop: spacing.md, marginBottom: spacing.sm },
   lockedTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: 4 },
+  helpHero: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, backgroundColor: colors.surfaceAlt, padding: spacing.md, marginBottom: spacing.md },
+  helpTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: 6 },
+  helpStep: { flexDirection: 'row', gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.sm },
+  helpStepNumber: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center' },
+  helpStepNumberText: { color: colors.white, fontWeight: '900' },
+  helpStepTitle: { color: colors.text, fontSize: 16, fontWeight: '900', marginBottom: 3 },
+  helpContactCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, backgroundColor: colors.surface, padding: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md },
+  emailButton: { minHeight: 48, borderRadius: 16, backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
+  emailButtonText: { color: colors.white, fontSize: 15, fontWeight: '900' },
   googleButton: { minHeight: 54, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md, paddingHorizontal: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   googleIcon: { width: 26, height: 26 },
   googleButtonText: { color: colors.goldLight, fontSize: 16, fontWeight: '800' },
