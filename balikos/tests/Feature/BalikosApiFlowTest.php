@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -277,6 +278,98 @@ class BalikosApiFlowTest extends TestCase
         $this->withToken($token)->putJson('/api/balikos/tagihan/'.$tagihanId.'/verifikasi')
             ->assertOk()
             ->assertJsonPath('data.status', 'lunas');
+
+        $this->assertSame(1000000, (int) DB::table('kos_wallets')->where('id', $walletId)->value('saldo_tersedia'));
+    }
+
+    public function test_xendit_invoice_and_webhook_are_idempotent(): void
+    {
+        config([
+            'services.xendit.secret_key' => 'xnd_test_secret',
+            'services.xendit.webhook_token' => 'callback-token-test',
+        ]);
+
+        $login = $this->postJson('/api/balikos/login', [
+            'email' => 'pemilik@balikos.test',
+            'password' => 'password',
+            'device_name' => 'feature-test',
+        ])->assertOk()->json();
+
+        $token = $login['token'];
+        $kosId = DB::table('kos')->where('owner_id', $login['user']['id'])->value('id');
+
+        $this->withToken($token)->postJson('/api/balikos/payment-methods', [
+            'kos_id' => $kosId,
+            'jenis' => 'qris',
+            'is_active' => true,
+        ])->assertCreated();
+
+        $room = $this->withToken($token)->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'XENDIT-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Test',
+            'harga_bulanan' => 1000000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+
+        $penghuni = $this->withToken($token)->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'nama_lengkap' => 'Penghuni Xendit Test',
+            'tanggal_masuk' => now()->toDateString(),
+            'status' => 'aktif',
+        ])->assertCreated()->json('data');
+
+        $this->withToken($token)->postJson('/api/balikos/tagihan/generate', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'bulan' => (int) now()->format('m'),
+            'tahun' => (int) now()->format('Y'),
+        ])->assertOk();
+
+        $tagihan = DB::table('tagihans')->where('penghuni_id', $penghuni['id'])->first();
+        $expectedReference = 'balikos-tagihan-'.$tagihan->id;
+
+        Http::fake([
+            'https://api.xendit.co/v2/invoices' => Http::response([
+                'id' => 'inv-test-'.$tagihan->id,
+                'external_id' => $expectedReference,
+                'status' => 'PENDING',
+                'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
+            ], 200),
+        ]);
+
+        $this->getJson('/api/balikos/portal/'.$penghuni['portal_token'].'/tagihan/'.$tagihan->id.'/qris')
+            ->assertOk()
+            ->assertJsonPath('data.invoice_url', 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id);
+
+        $walletId = DB::table('kos_wallets')->where('kos_id', $kosId)->value('id');
+        DB::table('kos_wallets')->where('id', $walletId)->update(['saldo_tersedia' => 0]);
+
+        $payload = [
+            'id' => 'inv-test-'.$tagihan->id,
+            'external_id' => $expectedReference,
+            'status' => 'PAID',
+            'paid_amount' => 1010000,
+            'amount' => 1010000,
+            'payment_id' => 'qrpy-test-'.$tagihan->id,
+            'payment_method' => 'QR_CODE',
+            'payment_channel' => 'QRIS',
+            'paid_at' => now()->toIso8601String(),
+        ];
+
+        $this->withHeader('x-callback-token', 'callback-token-test')
+            ->postJson('/api/balikos/xendit/webhook', $payload)
+            ->assertOk()
+            ->assertJsonPath('tagihan_id', $tagihan->id);
+
+        $this->assertSame('lunas', DB::table('tagihans')->where('id', $tagihan->id)->value('status'));
+        $this->assertSame(1000000, (int) DB::table('kos_wallets')->where('id', $walletId)->value('saldo_tersedia'));
+
+        $this->withHeader('x-callback-token', 'callback-token-test')
+            ->postJson('/api/balikos/xendit/webhook', $payload)
+            ->assertOk()
+            ->assertJsonPath('duplicate', true);
 
         $this->assertSame(1000000, (int) DB::table('kos_wallets')->where('id', $walletId)->value('saldo_tersedia'));
     }

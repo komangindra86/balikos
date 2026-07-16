@@ -2,12 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Balikos\XenditInvoiceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 class BalikosPortalController extends Controller
 {
+    public function __construct(private readonly XenditInvoiceService $xendit)
+    {
+    }
+
     public function show(string $token)
     {
         $data = $this->portalData($token);
@@ -102,6 +107,35 @@ class BalikosPortalController extends Controller
             ->with('success', 'Bukti pembayaran berhasil dikirim. Pemilik kos akan mengecek pembayaran ini.');
     }
 
+    public function payQris(string $token, int $tagihan)
+    {
+        $penghuni = DB::table('penghunis')->where('portal_token', $token)->first();
+        abort_if(! $penghuni, 404);
+
+        $bill = DB::table('tagihans')
+            ->where('id', $tagihan)
+            ->where('penghuni_id', $penghuni->id)
+            ->first();
+        abort_if(! $bill, 404);
+        abort_if($bill->status === 'lunas', 422, 'Tagihan ini sudah lunas.');
+
+        $method = DB::table('payment_methods')
+            ->where('kos_id', $penghuni->kos_id)
+            ->where('is_active', true)
+            ->where('jenis', 'qris')
+            ->first();
+        abort_if(! $method, 422, 'Metode QRIS belum aktif untuk kos ini.');
+
+        $bill = $this->xendit->ensureInvoiceForBill($bill, $token);
+
+        return redirect()->away($bill->gateway_invoice_url);
+    }
+
+    public function xenditWebhook(Request $request)
+    {
+        return response()->json($this->xendit->handleInvoiceWebhook($request));
+    }
+
     private function portalData(string $token): array
     {
         $penghuni = DB::table('penghunis')->where('portal_token', $token)->first();
@@ -122,9 +156,10 @@ class BalikosPortalController extends Controller
             ->get();
         $isQris = $paymentMethods->first() && ($paymentMethods->first()->jenis === 'qris' || $paymentMethods->first()->verification_mode === 'automatic');
         if ($isQris) {
-            $tagihan = $tagihan->map(function ($bill) {
+            $tagihan = $tagihan->map(function ($bill) use ($token) {
                 $bill->biaya_platform = (int) ($bill->biaya_platform ?: ceil(((int) $bill->nominal) * 0.01));
                 $bill->total_dibayar = (int) ($bill->total_dibayar ?: ((int) $bill->nominal + (int) $bill->biaya_platform));
+                $bill->qris_payment_url = route('balikos.portal.pay-qris', [$token, $bill->id]);
                 return $bill;
             });
         }

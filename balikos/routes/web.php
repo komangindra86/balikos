@@ -39,6 +39,9 @@ Route::get('/balikos/portal/{token}/status', [BalikosPortalController::class, 's
 Route::post('/balikos/portal/{token}/tagihan/{tagihan}/bukti', [BalikosPortalController::class, 'uploadProof'])
     ->whereNumber('tagihan')
     ->name('balikos.portal.upload-proof');
+Route::get('/balikos/portal/{token}/tagihan/{tagihan}/qris', [BalikosPortalController::class, 'payQris'])
+    ->whereNumber('tagihan')
+    ->name('balikos.portal.pay-qris');
 
 Route::middleware('balikos.auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');

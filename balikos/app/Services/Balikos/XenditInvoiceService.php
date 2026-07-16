@@ -1,0 +1,238 @@
+<?php
+
+namespace App\Services\Balikos;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+class XenditInvoiceService
+{
+    public function ensureInvoiceForBill(object $bill, ?string $portalToken = null): object
+    {
+        if (! empty($bill->gateway_invoice_url) && in_array($bill->gateway_status, [null, 'PENDING'], true)) {
+            return $bill;
+        }
+
+        $secretKey = (string) config('services.xendit.secret_key');
+        abort_if($secretKey === '', 422, 'Konfigurasi QRIS otomatis belum lengkap. Hubungi admin BALIKOS.');
+
+        $bill = $this->prepareBillForXendit($bill);
+        $penghuni = DB::table('penghunis')->where('id', $bill->penghuni_id)->first();
+        $kos = DB::table('kos')->where('id', $bill->kos_id)->first();
+        $kamar = DB::table('kamars')->where('id', $bill->kamar_id)->first();
+        abort_if(! $penghuni || ! $kos || ! $kamar, 404, 'Data tagihan tidak lengkap.');
+
+        $reference = $bill->gateway_reference ?: 'balikos-tagihan-'.$bill->id;
+        $redirectUrl = $portalToken
+            ? route('balikos.portal.show', $portalToken)
+            : url('/balikos/portal/'.$penghuni->portal_token);
+
+        $payload = [
+            'external_id' => $reference,
+            'amount' => (int) $bill->total_dibayar,
+            'description' => 'Tagihan kos '.$kos->nama_kos.' kamar '.$kamar->nomor_kamar.' periode '.str_pad((string) $bill->bulan, 2, '0', STR_PAD_LEFT).'/'.$bill->tahun,
+            'invoice_duration' => 86400 * 14,
+            'currency' => 'IDR',
+            'payment_methods' => ['QRIS'],
+            'success_redirect_url' => $redirectUrl,
+            'failure_redirect_url' => $redirectUrl,
+            'should_send_email' => false,
+            'customer' => [
+                'given_names' => $penghuni->nama_lengkap,
+                'mobile_number' => $this->normalizePhone($penghuni->no_wa ?? null),
+            ],
+            'items' => [[
+                'name' => 'Sewa kamar '.$kamar->nomor_kamar,
+                'quantity' => 1,
+                'price' => (int) $bill->nominal,
+                'category' => 'Rent',
+            ], [
+                'name' => 'Biaya layanan QRIS',
+                'quantity' => 1,
+                'price' => (int) $bill->biaya_platform,
+                'category' => 'Service Fee',
+            ]],
+            'metadata' => [
+                'app' => 'BALIKOS',
+                'tagihan_id' => (int) $bill->id,
+                'kos_id' => (int) $bill->kos_id,
+                'penghuni_id' => (int) $bill->penghuni_id,
+            ],
+        ];
+
+        $response = Http::withBasicAuth($secretKey, '')
+            ->acceptJson()
+            ->asJson()
+            ->timeout(20)
+            ->post('https://api.xendit.co/v2/invoices', $payload);
+
+        if (! $response->successful()) {
+            Log::warning('Xendit invoice creation failed', [
+                'tagihan_id' => $bill->id,
+                'status' => $response->status(),
+                'body' => $response->json() ?: $response->body(),
+            ]);
+            abort(422, 'Gagal membuat link QRIS. Silakan coba lagi beberapa saat.');
+        }
+
+        $invoice = $response->json();
+        abort_if(empty($invoice['invoice_url']), 422, 'Xendit belum mengembalikan link pembayaran QRIS.');
+
+        DB::table('tagihans')->where('id', $bill->id)->update([
+            'metode_pembayaran' => 'qris',
+            'gateway_provider' => 'xendit',
+            'gateway_reference' => $reference,
+            'gateway_invoice_id' => $invoice['id'] ?? null,
+            'gateway_invoice_url' => $invoice['invoice_url'] ?? null,
+            'gateway_status' => $invoice['status'] ?? 'PENDING',
+            'gateway_payload' => json_encode($invoice),
+            'updated_at' => now(),
+        ]);
+
+        return DB::table('tagihans')->where('id', $bill->id)->first();
+    }
+
+    public function handleInvoiceWebhook(Request $request): array
+    {
+        $configuredToken = (string) config('services.xendit.webhook_token');
+        if ($configuredToken !== '' && ! hash_equals($configuredToken, (string) $request->header('x-callback-token'))) {
+            abort(401, 'Webhook token tidak valid.');
+        }
+
+        $payload = $request->json()->all() ?: $request->all();
+        $status = strtoupper((string) ($payload['status'] ?? ''));
+        $reference = $payload['external_id'] ?? null;
+        $invoiceId = $payload['id'] ?? null;
+        $paymentId = $payload['payment_id'] ?? null;
+        $eventKey = 'xendit:invoice:'.($paymentId ?: $invoiceId ?: $reference).':'.$status;
+
+        abort_if(! $reference && ! $invoiceId, 422, 'Payload webhook tidak memiliki referensi invoice.');
+
+        return DB::transaction(function () use ($payload, $status, $reference, $invoiceId, $paymentId, $eventKey) {
+            if (DB::table('payment_gateway_events')->where('event_key', $eventKey)->lockForUpdate()->exists()) {
+                return ['message' => 'Webhook duplikat diabaikan.', 'duplicate' => true];
+            }
+
+            $billQuery = DB::table('tagihans')->lockForUpdate();
+            if ($reference) {
+                $billQuery->where('gateway_reference', $reference);
+            } else {
+                $billQuery->where('gateway_invoice_id', $invoiceId);
+            }
+            $bill = $billQuery->first();
+            abort_if(! $bill, 404, 'Tagihan untuk webhook ini tidak ditemukan.');
+
+            $eventId = DB::table('payment_gateway_events')->insertGetId([
+                'provider' => 'xendit',
+                'event_key' => $eventKey,
+                'event_type' => 'invoice.'.$status,
+                'gateway_reference' => $reference,
+                'gateway_payment_id' => $paymentId,
+                'tagihan_id' => $bill->id,
+                'payload' => json_encode($payload),
+                'processed_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $paidAmount = (int) ($payload['paid_amount'] ?? $payload['amount'] ?? 0);
+            $update = [
+                'gateway_invoice_id' => $invoiceId ?: $bill->gateway_invoice_id,
+                'gateway_payment_id' => $paymentId ?: $bill->gateway_payment_id,
+                'gateway_status' => $status ?: $bill->gateway_status,
+                'gateway_paid_amount' => $paidAmount ?: $bill->gateway_paid_amount,
+                'gateway_payload' => json_encode($payload),
+                'updated_at' => now(),
+            ];
+
+            if ($status === 'PAID' && $bill->status !== 'lunas' && $paidAmount >= (int) $bill->total_dibayar) {
+                $update = array_merge($update, [
+                    'status' => 'lunas',
+                    'tanggal_bayar' => isset($payload['paid_at']) ? Carbon::parse($payload['paid_at'])->toDateString() : now()->toDateString(),
+                    'metode_pembayaran' => 'qris',
+                    'tanggal_verifikasi' => now(),
+                    'tanggal_konfirmasi' => now(),
+                    'alasan_penolakan' => null,
+                ]);
+                $this->creditWalletOnce($bill);
+            }
+
+            DB::table('tagihans')->where('id', $bill->id)->update($update);
+
+            return ['message' => 'Webhook diproses.', 'event_id' => $eventId, 'tagihan_id' => $bill->id];
+        });
+    }
+
+    private function prepareBillForXendit(object $bill): object
+    {
+        $fee = (int) ($bill->biaya_platform ?: $this->qrisFee((int) $bill->nominal));
+        $total = (int) ($bill->total_dibayar ?: ((int) $bill->nominal + $fee));
+
+        if ((int) $bill->biaya_platform !== $fee || (int) ($bill->total_dibayar ?? 0) !== $total || empty($bill->gateway_reference)) {
+            DB::table('tagihans')->where('id', $bill->id)->update([
+                'biaya_platform' => $fee,
+                'total_dibayar' => $total,
+                'metode_pembayaran' => 'qris',
+                'gateway_provider' => 'xendit',
+                'gateway_reference' => $bill->gateway_reference ?: 'balikos-tagihan-'.$bill->id,
+                'updated_at' => now(),
+            ]);
+
+            $bill = DB::table('tagihans')->where('id', $bill->id)->first();
+        }
+
+        return $bill;
+    }
+
+    private function creditWalletOnce(object $bill): void
+    {
+        $wallet = DB::table('kos_wallets')->where('kos_id', $bill->kos_id)->lockForUpdate()->first();
+        if (! $wallet) {
+            $walletId = DB::table('kos_wallets')->insertGetId([
+                'kos_id' => $bill->kos_id,
+                'saldo_tersedia' => 0,
+                'saldo_pending' => 0,
+                'total_ditarik' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $wallet = DB::table('kos_wallets')->where('id', $walletId)->lockForUpdate()->first();
+        }
+
+        DB::table('kos_wallets')->where('id', $wallet->id)->update([
+            'saldo_tersedia' => DB::raw('saldo_tersedia + '.(int) $bill->nominal),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function qrisFee(int $nominal): int
+    {
+        return (int) ceil($nominal * 0.01);
+    }
+
+    private function normalizePhone(?string $phone): ?string
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone);
+        if (! $digits) {
+            return null;
+        }
+
+        if (Str::startsWith($digits, '0')) {
+            return '+62'.substr($digits, 1);
+        }
+
+        if (Str::startsWith($digits, '62')) {
+            return '+'.$digits;
+        }
+
+        return '+'.$digits;
+    }
+}

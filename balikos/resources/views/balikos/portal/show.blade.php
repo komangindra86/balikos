@@ -124,8 +124,8 @@
                         <div class="amount">{{ $rupiah($nextDueBill->total_dibayar ?? ($nextDueBill->nominal + ($nextDueBill->biaya_platform ?? 0))) }}</div>
                     </div>
                 @endif
-                @if ($nextDueBill && ! empty($activeMethod->qris_url))
-                    <a class="secondary" href="{{ $activeMethod->qris_url }}" target="_blank" rel="noopener">Bayar dengan QRIS</a>
+                @if ($nextDueBill && ! empty($nextDueBill->qris_payment_url))
+                    <a class="secondary" href="{{ $nextDueBill->qris_payment_url }}" target="_blank" rel="noopener">Bayar dengan QRIS</a>
                 @endif
             @elseif ($manualUploadBill)
                 <p class="muted">Untuk tagihan {{ $monthNames[(int) $manualUploadBill->bulan] ?? $manualUploadBill->bulan }} {{ $manualUploadBill->tahun }} sebesar {{ $rupiah($manualUploadBill->nominal) }}.</p>
@@ -170,8 +170,8 @@
                     @endif
 
                     @if ($activeMethod && $isQris && in_array($bill->status, $unpaidStatuses, true))
-                        @if (! empty($activeMethod->qris_url))
-                            <a class="secondary" href="{{ $activeMethod->qris_url }}" target="_blank" rel="noopener">Bayar dengan QRIS</a>
+                        @if (! empty($bill->qris_payment_url))
+                            <a class="secondary" href="{{ $bill->qris_payment_url }}" target="_blank" rel="noopener">Bayar dengan QRIS</a>
                         @else
                             <div class="card warning muted">QRIS pembayaran sedang disiapkan. Silakan hubungi pemilik kos jika tombol bayar belum muncul.</div>
                         @endif

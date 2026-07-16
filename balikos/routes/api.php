@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\BalikosApiController;
+use App\Http\Controllers\BalikosPortalController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,6 +22,8 @@ Route::prefix('balikos')->group(function () {
     })->where('path', '.*');
     Route::get('/portal/{portalToken}', [BalikosApiController::class, 'portalShow']);
     Route::post('/portal/{portalToken}/tagihan/{id}/bukti', [BalikosApiController::class, 'portalUploadBukti'])->whereNumber('id');
+    Route::get('/portal/{portalToken}/tagihan/{id}/qris', [BalikosApiController::class, 'portalPayQris'])->whereNumber('id');
+    Route::post('/xendit/webhook', [BalikosPortalController::class, 'xenditWebhook']);
 
     Route::middleware('balikos.api')->group(function () {
         Route::post('/logout', [BalikosApiController::class, 'logout']);

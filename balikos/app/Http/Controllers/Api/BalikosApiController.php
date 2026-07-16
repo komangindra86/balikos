@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Balikos\XenditInvoiceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -534,6 +535,17 @@ class BalikosApiController extends Controller
             ->orderByRaw("CASE WHEN jenis = 'qris' THEN 0 ELSE 1 END")
             ->get();
 
+        $isQris = $paymentMethods->first() && ($paymentMethods->first()->jenis === 'qris' || $paymentMethods->first()->verification_mode === 'automatic');
+        if ($isQris) {
+            $tagihan = $tagihan->map(function ($row) use ($portalToken) {
+                if (in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak'], true)) {
+                    $row->qris_payment_url = url('/api/balikos/portal/'.$portalToken.'/tagihan/'.$row->id.'/qris');
+                }
+
+                return $row;
+            });
+        }
+
         return response()->json([
             'data' => [
                 'kos' => $kos,
@@ -541,6 +553,34 @@ class BalikosApiController extends Controller
                 'penghuni' => $penghuni,
                 'tagihan' => $tagihan,
                 'payment_methods' => $paymentMethods,
+            ],
+        ]);
+    }
+
+    public function portalPayQris(string $portalToken, int $id, XenditInvoiceService $xendit)
+    {
+        $penghuni = DB::table('penghunis')->where('portal_token', $portalToken)->first();
+        abort_if(! $penghuni, 404, 'Portal penghuni tidak ditemukan.');
+
+        $bill = DB::table('tagihans')->where('id', $id)->where('penghuni_id', $penghuni->id)->first();
+        abort_if(! $bill, 404, 'Tagihan tidak ditemukan.');
+        abort_if($bill->status === 'lunas', 422, 'Tagihan ini sudah lunas.');
+
+        $method = DB::table('payment_methods')
+            ->where('kos_id', $penghuni->kos_id)
+            ->where('is_active', true)
+            ->where('jenis', 'qris')
+            ->first();
+        abort_if(! $method, 422, 'Metode QRIS belum aktif untuk kos ini.');
+
+        $bill = $xendit->ensureInvoiceForBill($bill, $portalToken);
+
+        return response()->json([
+            'data' => [
+                'invoice_url' => $bill->gateway_invoice_url,
+                'gateway_invoice_id' => $bill->gateway_invoice_id,
+                'gateway_reference' => $bill->gateway_reference,
+                'total_dibayar' => (int) $bill->total_dibayar,
             ],
         ]);
     }
