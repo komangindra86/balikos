@@ -63,6 +63,7 @@ Route::prefix('balikos')->group(function () {
         Route::post('/wallet/withdraw', [BalikosApiController::class, 'walletWithdraw']);
 
         Route::get('/keuangan', [BalikosApiController::class, 'keuanganIndex']);
+        Route::get('/keuangan/laporan-pdf', [BalikosApiController::class, 'keuanganPdf']);
         Route::post('/keuangan', [BalikosApiController::class, 'keuanganStore']);
         Route::put('/keuangan/{id}', [BalikosApiController::class, 'keuanganUpdate'])->whereNumber('id');
         Route::delete('/keuangan/{id}', [BalikosApiController::class, 'keuanganDelete'])->whereNumber('id');

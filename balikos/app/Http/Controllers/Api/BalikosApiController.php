@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class BalikosApiController extends Controller
 {
@@ -858,47 +859,22 @@ class BalikosApiController extends Controller
 
     public function keuanganIndex(Request $request)
     {
-        $kosIds = $this->ownedKosIds($request);
-        $kosId = $request->filled('kos_id') ? (int) $request->input('kos_id') : null;
-        $bulan = $request->filled('bulan') ? (int) $request->input('bulan') : (int) now()->month;
-        $tahun = $request->filled('tahun') ? (int) $request->input('tahun') : (int) now()->year;
-
-        $query = DB::table('transaksi_keuangan')->whereIn('kos_id', $this->ownedKosIds($request));
-        $this->applyKosFilter($request, $query);
-        $query->whereMonth('tanggal', $bulan);
-        $query->whereYear('tanggal', $tahun);
-
-        $incomeQuery = DB::table('transaksi_keuangan')->whereIn('kos_id', $kosIds)->where('jenis', 'pemasukan')->whereMonth('tanggal', $bulan)->whereYear('tanggal', $tahun);
-        $expenseQuery = DB::table('transaksi_keuangan')->whereIn('kos_id', $kosIds)->where('jenis', 'pengeluaran')->whereMonth('tanggal', $bulan)->whereYear('tanggal', $tahun);
-        $rentQuery = DB::table('tagihans')->whereIn('kos_id', $kosIds)->where('status', 'lunas')->where('bulan', $bulan)->where('tahun', $tahun);
-
-        if ($kosId) {
-            $this->assertOwnedKosId($request, $kosId);
-            $incomeQuery->where('kos_id', $kosId);
-            $expenseQuery->where('kos_id', $kosId);
-            $rentQuery->where('kos_id', $kosId);
-        }
-
-        $pendapatanSewa = (int) $rentQuery->sum('nominal');
-        $pemasukanLain = (int) $incomeQuery->sum('nominal');
-        $pengeluaran = (int) $expenseQuery->sum('nominal');
-        $totalPemasukan = $pendapatanSewa + $pemasukanLain;
-        $labaRugi = $totalPemasukan - $pengeluaran;
+        $report = $this->financialReportData($request);
 
         return response()->json([
-            'data' => $query->orderByDesc('tanggal')->get(),
-            'summary' => [
-                'bulan' => $bulan,
-                'tahun' => $tahun,
-                'pendapatan_sewa' => $pendapatanSewa,
-                'pemasukan_lain' => $pemasukanLain,
-                'total_pemasukan' => $totalPemasukan,
-                'pengeluaran' => $pengeluaran,
-                'laba_rugi' => $labaRugi,
-                'margin_persen' => $totalPemasukan > 0 ? round(($labaRugi / $totalPemasukan) * 100, 1) : 0,
-                'status' => $labaRugi >= 0 ? 'untung' : 'rugi',
-            ],
+            'data' => $report['transactions'],
+            'summary' => $report['summary'],
         ]);
+    }
+
+    public function keuanganPdf(Request $request)
+    {
+        $report = $this->financialReportData($request);
+        $kosName = $report['kos']?->nama_kos ?? 'Semua Kos';
+        $filename = 'laporan-keuangan-'.Str::slug($kosName).'-'.$report['summary']['tahun'].'-'.str_pad((string) $report['summary']['bulan'], 2, '0', STR_PAD_LEFT).'.pdf';
+        $pdf = Pdf::loadView('pdf.balikos-keuangan', $report)->setPaper('a4', 'portrait');
+
+        return $pdf->download($filename);
     }
 
     public function keuanganStore(Request $request)
@@ -1070,6 +1046,85 @@ class BalikosApiController extends Controller
         }
 
         return $request->file($field)->store($directory, 'public');
+    }
+
+    private function financialReportData(Request $request): array
+    {
+        $kosIds = $this->ownedKosIds($request);
+        $kosId = $request->filled('kos_id') ? (int) $request->input('kos_id') : null;
+        $bulan = $request->filled('bulan') ? (int) $request->input('bulan') : (int) now()->month;
+        $tahun = $request->filled('tahun') ? (int) $request->input('tahun') : (int) now()->year;
+        $kos = null;
+
+        if ($kosId) {
+            $this->assertOwnedKosId($request, $kosId);
+            $kos = DB::table('kos')->where('id', $kosId)->first();
+        }
+
+        $transactionQuery = DB::table('transaksi_keuangan')
+            ->whereIn('kos_id', $kosIds)
+            ->whereMonth('tanggal', $bulan)
+            ->whereYear('tanggal', $tahun);
+        $this->applyKosFilter($request, $transactionQuery);
+
+        $incomeQuery = DB::table('transaksi_keuangan')
+            ->whereIn('kos_id', $kosIds)
+            ->where('jenis', 'pemasukan')
+            ->whereMonth('tanggal', $bulan)
+            ->whereYear('tanggal', $tahun);
+        $expenseQuery = DB::table('transaksi_keuangan')
+            ->whereIn('kos_id', $kosIds)
+            ->where('jenis', 'pengeluaran')
+            ->whereMonth('tanggal', $bulan)
+            ->whereYear('tanggal', $tahun);
+        $rentQuery = DB::table('tagihans')
+            ->leftJoin('kamars', 'kamars.id', '=', 'tagihans.kamar_id')
+            ->leftJoin('penghunis', 'penghunis.id', '=', 'tagihans.penghuni_id')
+            ->whereIn('tagihans.kos_id', $kosIds)
+            ->where('tagihans.status', 'lunas')
+            ->where('tagihans.bulan', $bulan)
+            ->where('tagihans.tahun', $tahun);
+
+        if ($kosId) {
+            $incomeQuery->where('kos_id', $kosId);
+            $expenseQuery->where('kos_id', $kosId);
+            $rentQuery->where('tagihans.kos_id', $kosId);
+        }
+
+        $rentRows = (clone $rentQuery)
+            ->orderBy('kamars.nomor_kamar')
+            ->get([
+                'tagihans.id',
+                'tagihans.nominal',
+                'tagihans.tanggal_bayar',
+                'tagihans.metode_pembayaran',
+                'kamars.nomor_kamar',
+                'penghunis.nama_lengkap',
+            ]);
+        $transactions = $transactionQuery->orderByDesc('tanggal')->get();
+
+        $pendapatanSewa = (int) $rentRows->sum('nominal');
+        $pemasukanLain = (int) $incomeQuery->sum('nominal');
+        $pengeluaran = (int) $expenseQuery->sum('nominal');
+        $totalPemasukan = $pendapatanSewa + $pemasukanLain;
+        $labaRugi = $totalPemasukan - $pengeluaran;
+
+        return [
+            'kos' => $kos,
+            'transactions' => $transactions,
+            'rentBills' => $rentRows,
+            'summary' => [
+                'bulan' => $bulan,
+                'tahun' => $tahun,
+                'pendapatan_sewa' => $pendapatanSewa,
+                'pemasukan_lain' => $pemasukanLain,
+                'total_pemasukan' => $totalPemasukan,
+                'pengeluaran' => $pengeluaran,
+                'laba_rugi' => $labaRugi,
+                'margin_persen' => $totalPemasukan > 0 ? round(($labaRugi / $totalPemasukan) * 100, 1) : 0,
+                'status' => $labaRugi >= 0 ? 'untung' : 'rugi',
+            ],
+        ];
     }
 
     private function storeRoomPhotos(Request $request, int $kamarId): void

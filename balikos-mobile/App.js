@@ -9,6 +9,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import { api, setApiBase, setToken } from './src/services/api';
@@ -781,6 +782,33 @@ export default function App() {
     }, 'Gagal menyimpan transaksi');
   }
 
+  async function downloadFinancePdf() {
+    if (!activeKosId) return Alert.alert('Pilih kos', 'Pilih kos yang ingin dibuat laporannya.');
+    await submit(async () => {
+      const month = String(financeFilter.bulan).padStart(2, '0');
+      const filename = `laporan-keuangan-${activeKosId}-${financeFilter.tahun}-${month}.pdf`;
+      const target = `${FileSystem.documentDirectory}${filename}`;
+      const url = `${apiBase}/keuangan/laporan-pdf?kos_id=${activeKosId}&bulan=${financeFilter.bulan}&tahun=${financeFilter.tahun}`;
+      const result = await FileSystem.downloadAsync(url, target, {
+        headers: { Authorization: `Bearer ${tokenValue}`, Accept: 'application/pdf' },
+      });
+
+      if (result.status < 200 || result.status >= 300) {
+        throw new Error(`Download gagal. Server mengirim status ${result.status}.`);
+      }
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(result.uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Simpan atau bagikan laporan keuangan',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        Alert.alert('PDF berhasil dibuat', `File tersimpan di ${result.uri}`);
+      }
+    }, 'Gagal download laporan PDF');
+  }
+
   async function saveAnnouncement() {
     if (!announcementForm.judul.trim() || !announcementForm.isi.trim()) return Alert.alert('Pengumuman belum lengkap', 'Isi judul dan isi pengumuman.');
     await submit(async () => {
@@ -866,7 +894,7 @@ export default function App() {
         {tab === 'dashboard' && <Dashboard data={dashboard} activeKos={activeKos} setTab={setTab} />}
         {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
-        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
+        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} downloadFinancePdf={downloadFinancePdf} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
@@ -1158,7 +1186,7 @@ function BillsScreen({ bills, rooms, apiBase, openGenerate, openMultiPay, autoGe
   );
 }
 
-function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, announcements, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, setModal, logout }) {
+function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, downloadFinancePdf, announcements, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, setModal, logout }) {
   const activeMethod = paymentMethods.find((item) => Number(item.is_active) === 1 || item.is_active === true);
   return (
     <>
@@ -1186,6 +1214,7 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
             <Text style={styles.periodLabel}>Periode laporan</Text>
             <Text style={styles.periodValue}>{monthName(financeFilter.bulan)} {financeFilter.tahun}</Text>
           </Pressable>
+          <SecondaryButton title="Download PDF" onPress={downloadFinancePdf} style={{ marginBottom: spacing.md }} />
           <ProfitSummary summary={financeSummary} />
           <Text style={styles.sectionTitle}>Transaksi Manual</Text>
           <Text style={styles.muted}>Daftar ini berisi pemasukan/pengeluaran yang pemilik input sendiri, misalnya listrik, air, kebersihan, perbaikan, deposit, atau denda.</Text>

@@ -212,6 +212,10 @@ class BalikosApiFlowTest extends TestCase
             ->assertJsonPath('summary.laba_rugi', -50000)
             ->assertJsonPath('summary.status', 'rugi');
 
+        $pdf = $this->withToken($token)->get('/api/balikos/keuangan/laporan-pdf?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'));
+        $pdf->assertOk();
+        $this->assertStringStartsWith('%PDF', $pdf->getContent());
+
         $this->withToken($token)->postJson('/api/balikos/pengumuman', [
             'kos_id' => $kosId,
             'judul' => 'Info Test',
