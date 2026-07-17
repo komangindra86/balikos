@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, setApiBase, setToken } from './src/services/api';
 import { colors, spacing } from './src/theme';
 import FormField from './src/components/FormField';
@@ -90,6 +91,15 @@ const emptyAnnouncementForm = { judul: '', isi: '', status: 'aktif' };
 const emptyWithdrawForm = { nominal: '', nama_bank: '', nomor_rekening: '', atas_nama: '' };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <BalikosApp />
+    </SafeAreaProvider>
+  );
+}
+
+function BalikosApp() {
+  const safeInsets = useSafeAreaInsets();
   const [booting, setBooting] = useState(true);
   const [tokenValue, setTokenValue] = useState(null);
   const [apiBase, setApiBaseValue] = useState(DEFAULT_API);
@@ -986,7 +996,7 @@ export default function App() {
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} filter={occupantFilter} setFilter={setOccupantFilter} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
         {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} downloadFinancePdf={downloadFinancePdf} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
       </ScrollView>
-      <BottomNav tab={tab} setTab={setTab} />
+      <BottomNav tab={tab} setTab={setTab} bottomInset={safeInsets.bottom} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
       <OccupantDetailModal occupant={occupantDetail} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(occupantDetail?.id))} rooms={rooms} apiBase={apiBase} onClose={() => setOccupantDetail(null)} onEdit={openOccupantEditModal} onCheckout={checkoutOccupant} onSharePortal={shareOccupantPortal} onGenerateBill={generateBillForOccupant} onCashPay={openCashPaymentForOccupant} updateBillStatus={updateBillStatus} openImagePreview={setImagePreview} />
       <ImagePreviewModal uri={imagePreview} onClose={() => setImagePreview(null)} />
@@ -2182,9 +2192,19 @@ function KosPicker({ kosList, activeKosId, setActiveKosId, onAdd, onEdit }) {
   );
 }
 
-function BottomNav({ tab, setTab }) {
+function BottomNav({ tab, setTab, bottomInset = 0 }) {
   const items = [['dashboard', 'Dashboard'], ['kamar', 'Kamar'], ['penghuni', 'Penghuni'], ['lainnya', 'Lainnya']];
-  return <View style={styles.bottomNav}>{items.map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={styles.navItem}><Text style={[styles.navText, tab === key && styles.navTextActive]}>{label}</Text></Pressable>)}</View>;
+  return (
+    <View pointerEvents="box-none" style={[styles.bottomNavWrap, { paddingBottom: Math.max(bottomInset, spacing.sm) }]}>
+      <View style={styles.bottomNav}>
+        {items.map(([key, label]) => (
+          <Pressable key={key} hitSlop={10} onPress={() => setTab(key)} style={({ pressed }) => [styles.navItem, pressed && styles.pressed]}>
+            <Text style={[styles.navText, tab === key && styles.navTextActive]}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
 }
 
 function HeaderAction({ title, action, onPress }) {
@@ -2686,7 +2706,7 @@ function statusStyle(status) {
 
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: 118 },
+  content: { padding: spacing.lg, paddingBottom: 150 },
   modalContent: { padding: spacing.lg, paddingBottom: 320 },
   hero: { borderRadius: 28, padding: spacing.lg, marginBottom: spacing.lg },
   authHeaderClean: { paddingTop: spacing.sm, paddingBottom: spacing.lg, marginBottom: spacing.sm },
@@ -2843,8 +2863,9 @@ const styles = StyleSheet.create({
   kosAddText: { color: colors.gold, fontWeight: '800' },
   kosEditPill: { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
   kosEditText: { color: colors.muted, fontWeight: '800' },
-  bottomNav: { position: 'absolute', left: spacing.sm, right: spacing.sm, bottom: spacing.md, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', padding: 5 },
-  navItem: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm },
+  bottomNavWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, backgroundColor: 'transparent' },
+  bottomNav: { borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', padding: 5 },
+  navItem: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm },
   navText: { color: colors.muted, fontWeight: '700', fontSize: 11 },
   navTextActive: { color: colors.goldLight },
   smallButton: { minHeight: 42, paddingHorizontal: spacing.md },
