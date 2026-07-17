@@ -33,7 +33,8 @@
     },
     "plugins": [
       "expo-web-browser",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-font"
     ]
   }
 }

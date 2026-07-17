@@ -13,6 +13,7 @@ import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { api, setApiBase, setToken } from './src/services/api';
 import { colors, spacing } from './src/theme';
 import FormField from './src/components/FormField';
@@ -2193,15 +2194,24 @@ function KosPicker({ kosList, activeKosId, setActiveKosId, onAdd, onEdit }) {
 }
 
 function BottomNav({ tab, setTab, bottomInset = 0 }) {
-  const items = [['dashboard', 'Dashboard'], ['kamar', 'Kamar'], ['penghuni', 'Penghuni'], ['lainnya', 'Lainnya']];
+  const items = [
+    ['dashboard', 'Dashboard', 'grid'],
+    ['kamar', 'Kamar', 'bed'],
+    ['penghuni', 'Penghuni', 'people'],
+    ['lainnya', 'Lainnya', 'settings'],
+  ];
   return (
     <View pointerEvents="box-none" style={[styles.bottomNavWrap, { paddingBottom: Math.max(bottomInset, spacing.sm) }]}>
       <View style={styles.bottomNav}>
-        {items.map(([key, label]) => (
+        {items.map(([key, label, icon]) => {
+          const active = tab === key;
+          return (
           <Pressable key={key} hitSlop={10} onPress={() => setTab(key)} style={({ pressed }) => [styles.navItem, pressed && styles.pressed]}>
-            <Text style={[styles.navText, tab === key && styles.navTextActive]}>{label}</Text>
+            <Ionicons name={active ? icon : `${icon}-outline`} size={20} color={active ? colors.goldLight : colors.muted} />
+            <Text style={[styles.navText, active && styles.navTextActive]}>{label}</Text>
           </Pressable>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
@@ -2865,7 +2875,7 @@ const styles = StyleSheet.create({
   kosEditText: { color: colors.muted, fontWeight: '800' },
   bottomNavWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, backgroundColor: 'transparent' },
   bottomNav: { borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', padding: 5 },
-  navItem: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm },
+  navItem: { flex: 1, minHeight: 54, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: spacing.xs },
   navText: { color: colors.muted, fontWeight: '700', fontSize: 11 },
   navTextActive: { color: colors.goldLight },
   smallButton: { minHeight: 42, paddingHorizontal: spacing.md },
