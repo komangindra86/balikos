@@ -55,6 +55,8 @@
         .success { background:#e8f7ef; border-color:#bfe7d0; color:#136d47; }
         .warning { background:#fff8e8; border-color:#f1d38b; }
         .paybox { background:var(--soft); border:1px solid var(--line); border-radius:16px; padding:14px; margin-top:12px; }
+        .note-box { background:var(--soft); border:1px solid var(--line); border-radius:16px; padding:12px; margin-top:12px; }
+        .note-box strong { display:block; margin-bottom:4px; }
         .actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
         .announcement { border-left:4px solid var(--teal); }
         .hidden { display:none; }
@@ -95,6 +97,12 @@
                 <h2>Data Kamar</h2>
                 <div class="muted">Kamar {{ $kamar->nomor_kamar ?? '-' }}</div>
                 <div class="muted">Masuk {{ $penghuni->tanggal_masuk ?? '-' }}</div>
+                @if (! empty($kamar->catatan))
+                    <div class="note-box">
+                        <strong>Catatan kamar</strong>
+                        <div class="muted">{{ $kamar->catatan }}</div>
+                    </div>
+                @endif
             </div>
             <div class="card">
                 <h2>Metode Bayar</h2>
