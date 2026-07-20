@@ -56,6 +56,7 @@ const emptyRoomForm = {
   status: 'kosong',
   fasilitas_ac: false,
   fasilitas_km_dalam: true,
+  fasilitas_dapur_dalam: false,
   fasilitas_wifi: true,
   fasilitas_kasur: true,
   fasilitas_lemari: false,
@@ -87,8 +88,8 @@ const emptyBillForm = { kamar_id: '', bulan: thisMonth(), tahun: thisYear(), jum
 const emptyMultiPayForm = { kamar_id: '', penghuni_id: '', bulan: thisMonth(), tahun: thisYear(), jumlah_bulan: '2', tanggal_bayar: today(), metode_pembayaran: 'tunai' };
 const emptyRoomStatusForm = { id: '', nomor_kamar: '', status: 'kosong' };
 const emptyPaymentForm = { jenis: 'qris', nama_bank: '', nomor_rekening: '', atas_nama: '', instruksi_pembayaran: '', is_active: true };
-const emptyFinanceForm = { jenis: 'pemasukan', tanggal: today(), nominal: '', keterangan: '' };
-const emptyAnnouncementForm = { judul: '', isi: '', status: 'aktif' };
+const emptyFinanceForm = { id: null, jenis: 'pemasukan', tanggal: today(), nominal: '', keterangan: '' };
+const emptyAnnouncementForm = { id: null, judul: '', isi: '', status: 'aktif' };
 const emptyWithdrawForm = { nominal: '', nama_bank: '', nomor_rekening: '', atas_nama: '' };
 
 export default function App() {
@@ -142,6 +143,8 @@ function BalikosApp() {
   const [modal, setModal] = useState(null);
   const [periodDraft, setPeriodDraft] = useState({ bulan: thisMonth(), tahun: thisYear() });
   const waitingVerificationRef = useRef(null);
+  const sessionVersionRef = useRef(0);
+  const activeKosIdRef = useRef(null);
   const googleWebClientId = Constants.expoConfig?.extra?.googleWebClientId || Constants.manifest?.extra?.googleWebClientId || '';
   const googleAndroidClientId = Constants.expoConfig?.extra?.googleAndroidClientId || Constants.manifest?.extra?.googleAndroidClientId || GOOGLE_ANDROID_CLIENT_ID;
 
@@ -171,6 +174,10 @@ function BalikosApp() {
   useEffect(() => {
     if (tokenValue) registerPushToken();
   }, [tokenValue]);
+
+  useEffect(() => {
+    activeKosIdRef.current = activeKosId;
+  }, [activeKosId]);
 
   useEffect(() => {
     if (!tokenValue || !activeKosId) return;
@@ -220,7 +227,70 @@ function BalikosApp() {
     return () => subscription.remove();
   }, [imagePreview, modal, roomDetail, occupantDetail, tab, moreScreen, tokenValue]);
 
+  function clearKosScopedState() {
+    setDashboard(null);
+    setRooms([]);
+    setOccupants([]);
+    setBills([]);
+    setPaymentMethods([]);
+    setPaymentWallet(null);
+    setFinances([]);
+    setFinanceSummary(null);
+    setAnnouncements([]);
+    setRoomDetail(null);
+    setOccupantDetail(null);
+    setImagePreview(null);
+    setModal(null);
+    setRoomForm(emptyRoomForm);
+    setOccupantForm(emptyOccupantForm);
+    setBillForm(emptyBillForm);
+    setMultiPayForm(emptyMultiPayForm);
+    setMultiPayContext(null);
+    setRoomStatusForm(emptyRoomStatusForm);
+    setPaymentForm(emptyPaymentForm);
+    setFinanceForm(emptyFinanceForm);
+    setAnnouncementForm(emptyAnnouncementForm);
+    setWithdrawForm(emptyWithdrawForm);
+    waitingVerificationRef.current = null;
+  }
+
+  function resetAccountState() {
+    sessionVersionRef.current += 1;
+    activeKosIdRef.current = null;
+    clearKosScopedState();
+    setKosList([]);
+    setActiveKosId(null);
+    setKosForm(emptyKosForm);
+    setTab('dashboard');
+    setMoreScreen('payment');
+    setOccupantFilter('semua');
+    setFinanceFilter({ bulan: thisMonth(), tahun: thisYear() });
+    setPeriodDraft({ bulan: thisMonth(), tahun: thisYear() });
+  }
+
+  function changeActiveKos(nextKosId) {
+    const normalizedId = nextKosId || null;
+    if (String(normalizedId || '') === String(activeKosIdRef.current || '')) return;
+    activeKosIdRef.current = normalizedId;
+    clearKosScopedState();
+    setActiveKosId(normalizedId);
+  }
+
+  function currentKosRequest() {
+    return {
+      session: sessionVersionRef.current,
+      kosId: activeKosIdRef.current || activeKosId,
+    };
+  }
+
+  function isCurrentKosRequest(context) {
+    return context.session === sessionVersionRef.current
+      && String(context.kosId || '') === String(activeKosIdRef.current || '');
+  }
+
   async function saveAuth(nextToken) {
+    resetAccountState();
+    setPassword('');
     setTokenValue(nextToken);
     setToken(nextToken);
     setApiBase(apiBase);
@@ -291,29 +361,44 @@ function BalikosApp() {
   }
 
   async function loadKos() {
+    const requestSession = sessionVersionRef.current;
     const response = await api('/kos');
-    setKosList(response.data || []);
-    if (!activeKosId && response.data?.length) setActiveKosId(response.data[0].id);
+    if (requestSession !== sessionVersionRef.current) return;
+
+    const nextKos = response.data || [];
+    setKosList(nextKos);
+    const currentKosStillAvailable = nextKos.some((item) => String(item.id) === String(activeKosIdRef.current));
+    const nextKosId = currentKosStillAvailable ? activeKosIdRef.current : (nextKos[0]?.id || null);
+    if (String(nextKosId || '') !== String(activeKosIdRef.current || '')) changeActiveKos(nextKosId);
   }
 
   async function loadDashboard() {
+    const context = currentKosRequest();
+    if (!context.kosId) return;
     const [dashboardResponse, occupantResponse] = await Promise.all([
-      api(`/dashboard?kos_id=${activeKosId}`),
-      api(`/penghuni?kos_id=${activeKosId}`),
+      api(`/dashboard?kos_id=${context.kosId}`),
+      api(`/penghuni?kos_id=${context.kosId}`),
     ]);
+    if (!isCurrentKosRequest(context)) return;
     setDashboard(dashboardResponse.data);
     setOccupants(occupantResponse.data || []);
   }
 
   async function loadRooms() {
-    const response = await api(`/kamar?kos_id=${activeKosId}`);
+    const context = currentKosRequest();
+    if (!context.kosId) return;
+    const response = await api(`/kamar?kos_id=${context.kosId}`);
+    if (!isCurrentKosRequest(context)) return;
     const nextRooms = response.data || [];
     setRooms(nextRooms);
     prefetchRoomPhotos(nextRooms, apiBase);
   }
 
   async function loadOccupants() {
-    const response = await api(`/penghuni?kos_id=${activeKosId}`);
+    const context = currentKosRequest();
+    if (!context.kosId) return;
+    const response = await api(`/penghuni?kos_id=${context.kosId}`);
+    if (!isCurrentKosRequest(context)) return;
     setOccupants(response.data || []);
     if (rooms.length === 0) loadRooms();
   }
@@ -323,7 +408,10 @@ function BalikosApp() {
   }
 
   async function loadBills() {
-    const response = await api(`/tagihan?kos_id=${activeKosId}`);
+    const context = currentKosRequest();
+    if (!context.kosId) return;
+    const response = await api(`/tagihan?kos_id=${context.kosId}`);
+    if (!isCurrentKosRequest(context)) return;
     setBills(response.data || []);
     waitingVerificationRef.current = (response.data || []).filter((bill) => bill.status === 'menunggu_verifikasi').length;
     if (rooms.length === 0) loadRooms();
@@ -331,7 +419,10 @@ function BalikosApp() {
 
   async function checkBillUpdates() {
     try {
-      const response = await api(`/tagihan?kos_id=${activeKosId}`);
+      const context = currentKosRequest();
+      if (!context.kosId) return;
+      const response = await api(`/tagihan?kos_id=${context.kosId}`);
+      if (!isCurrentKosRequest(context)) return;
       const nextBills = response.data || [];
       const waitingCount = nextBills.filter((bill) => bill.status === 'menunggu_verifikasi').length;
       if (waitingVerificationRef.current !== null && waitingCount > waitingVerificationRef.current) {
@@ -344,18 +435,23 @@ function BalikosApp() {
   }
 
   async function loadMore() {
+    const context = currentKosRequest();
+    if (!context.kosId) return;
     if (moreScreen === 'payment') {
-      const response = await api(`/payment-methods?kos_id=${activeKosId}`);
+      const response = await api(`/payment-methods?kos_id=${context.kosId}`);
+      if (!isCurrentKosRequest(context)) return;
       setPaymentMethods(response.data || []);
       setPaymentWallet(response.wallet || null);
     }
     if (moreScreen === 'finance') {
-      const response = await api(`/keuangan?kos_id=${activeKosId}&bulan=${financeFilter.bulan}&tahun=${financeFilter.tahun}`);
+      const response = await api(`/keuangan?kos_id=${context.kosId}&bulan=${financeFilter.bulan}&tahun=${financeFilter.tahun}`);
+      if (!isCurrentKosRequest(context)) return;
       setFinances(response.data || []);
       setFinanceSummary(response.summary || null);
     }
     if (moreScreen === 'announcement') {
-      const response = await api(`/pengumuman?kos_id=${activeKosId}`);
+      const response = await api(`/pengumuman?kos_id=${context.kosId}`);
+      if (!isCurrentKosRequest(context)) return;
       setAnnouncements(response.data || []);
     }
   }
@@ -443,7 +539,7 @@ function BalikosApp() {
       const createdId = response.data?.id;
       setKosForm(emptyKosForm);
       await loadKos();
-      if (createdId) setActiveKosId(createdId);
+      if (createdId) changeActiveKos(createdId);
       setModal(null);
     }, 'Gagal menyimpan kos');
   }
@@ -486,11 +582,7 @@ function BalikosApp() {
               const response = await api('/kos');
               const nextKos = response.data || [];
               setKosList(nextKos);
-              setActiveKosId(nextKos[0]?.id || null);
-              setRooms([]);
-              setOccupants([]);
-              setBills([]);
-              setDashboard(null);
+              changeActiveKos(nextKos[0]?.id || null);
             }, 'Gagal menghapus kos');
           },
         },
@@ -865,7 +957,10 @@ function BalikosApp() {
   async function saveFinance() {
     if (!cleanNumber(financeForm.nominal)) return Alert.alert('Nominal wajib diisi', 'Isi angka saja.');
     await submit(async () => {
-      const response = await api('/keuangan', { method: 'POST', body: { ...financeForm, kos_id: activeKosId, nominal: Number(cleanNumber(financeForm.nominal)) } });
+      const isEdit = Boolean(financeForm.id);
+      const body = { ...financeForm, kos_id: activeKosId, nominal: Number(cleanNumber(financeForm.nominal)) };
+      delete body.id;
+      const response = await api(isEdit ? `/keuangan/${financeForm.id}` : '/keuangan', { method: isEdit ? 'PUT' : 'POST', body });
       const savedDate = response.data?.tanggal || financeForm.tanggal;
       const [savedYear, savedMonth] = String(savedDate).split('-');
       setModal(null);
@@ -878,8 +973,42 @@ function BalikosApp() {
         setFinances(response.data || []);
         setFinanceSummary(response.summary || null);
       }
-      Alert.alert('Transaksi tersimpan', `Laporan dipindahkan ke ${monthName(savedMonth || thisMonth())} ${savedYear || thisYear()}.`);
+      Alert.alert(isEdit ? 'Transaksi diperbarui' : 'Transaksi tersimpan', `Data tampil pada laporan ${monthName(savedMonth || thisMonth())} ${savedYear || thisYear()}.`);
     }, 'Gagal menyimpan transaksi');
+  }
+
+  function openFinanceCreateModal() {
+    setFinanceForm({ ...emptyFinanceForm, tanggal: today() });
+    setModal('finance');
+  }
+
+  function openFinanceEditModal(item) {
+    setFinanceForm({
+      id: item.id,
+      jenis: item.jenis || 'pengeluaran',
+      tanggal: item.tanggal || today(),
+      nominal: formatNumberInput(item.nominal),
+      keterangan: item.keterangan || '',
+    });
+    setModal('finance');
+  }
+
+  function deleteFinance(item) {
+    Alert.alert(
+      'Hapus transaksi?',
+      `${item.jenis === 'pengeluaran' ? 'Pengeluaran' : 'Pemasukan'} ${money(item.nominal)} akan dihapus dari laporan keuangan.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: () => submit(async () => {
+            await api(`/keuangan/${item.id}`, { method: 'DELETE' });
+            await loadMore();
+          }, 'Gagal menghapus transaksi'),
+        },
+      ],
+    );
   }
 
   async function downloadFinancePdf() {
@@ -912,11 +1041,47 @@ function BalikosApp() {
   async function saveAnnouncement() {
     if (!announcementForm.judul.trim() || !announcementForm.isi.trim()) return Alert.alert('Pengumuman belum lengkap', 'Isi judul dan isi pengumuman.');
     await submit(async () => {
-      await api('/pengumuman', { method: 'POST', body: { ...announcementForm, kos_id: activeKosId } });
+      const isEdit = Boolean(announcementForm.id);
+      const body = { ...announcementForm, kos_id: activeKosId };
+      delete body.id;
+      await api(isEdit ? `/pengumuman/${announcementForm.id}` : '/pengumuman', { method: isEdit ? 'PUT' : 'POST', body });
       setModal(null);
       setAnnouncementForm(emptyAnnouncementForm);
       await loadMore();
     }, 'Gagal menyimpan pengumuman');
+  }
+
+  function openAnnouncementCreateModal() {
+    setAnnouncementForm(emptyAnnouncementForm);
+    setModal('announcement');
+  }
+
+  function openAnnouncementEditModal(item) {
+    setAnnouncementForm({
+      id: item.id,
+      judul: item.judul || '',
+      isi: item.isi || '',
+      status: item.status || 'aktif',
+    });
+    setModal('announcement');
+  }
+
+  function deleteAnnouncement(item) {
+    Alert.alert(
+      'Hapus pengumuman?',
+      `Pengumuman "${item.judul}" akan dihapus permanen dan tidak lagi tersedia untuk penghuni.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: () => submit(async () => {
+            await api(`/pengumuman/${item.id}`, { method: 'DELETE' });
+            await loadMore();
+          }, 'Gagal menghapus pengumuman'),
+        },
+      ],
+    );
   }
 
   async function toggleAnnouncement(item) {
@@ -954,12 +1119,16 @@ function BalikosApp() {
   }
 
   async function logout() {
-    try {
-      await api('/logout', { method: 'POST' });
-    } catch {}
-    await AsyncStorage.removeItem('token');
+    const logoutRequest = api('/logout', { method: 'POST' }).catch(() => null);
+    resetAccountState();
+    setPassword('');
+    setRegister({ name: '', email: '', phone: '', password: '', password_confirmation: '' });
     setToken(null);
     setTokenValue(null);
+    await AsyncStorage.removeItem('token');
+    try {
+      await logoutRequest;
+    } catch {}
   }
 
   if (booting) return <Shell><Text style={styles.muted}>Memuat BALIKOS...</Text></Shell>;
@@ -991,11 +1160,11 @@ function BalikosApp() {
           />
         )}
       >
-        <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={setActiveKosId} onAdd={openKosCreateModal} onEdit={openKosEditModal} />
+        <KosPicker kosList={kosList} activeKosId={activeKosId} setActiveKosId={changeActiveKos} onAdd={openKosCreateModal} onEdit={openKosEditModal} />
         {tab === 'dashboard' && <Dashboard data={dashboard} occupants={occupants} activeKos={activeKos} setTab={setTab} setOccupantFilter={setOccupantFilter} />}
         {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} filter={occupantFilter} setFilter={setOccupantFilter} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
-        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} downloadFinancePdf={downloadFinancePdf} announcements={announcements} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
+        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} openFinanceCreateModal={openFinanceCreateModal} openFinanceEditModal={openFinanceEditModal} deleteFinance={deleteFinance} downloadFinancePdf={downloadFinancePdf} announcements={announcements} openAnnouncementCreateModal={openAnnouncementCreateModal} openAnnouncementEditModal={openAnnouncementEditModal} deleteAnnouncement={deleteAnnouncement} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} bottomInset={safeInsets.bottom} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
@@ -1011,8 +1180,8 @@ function BalikosApp() {
       <PaymentFormModal visible={modal === 'payment'} form={paymentForm} setForm={setPaymentForm} onSave={savePaymentMethod} onClose={() => setModal(null)} loading={loading} />
       <PaymentInfoModal visible={modal === 'paymentInfo'} onClose={() => setModal(null)} />
       <WithdrawModal visible={modal === 'withdraw'} form={withdrawForm} setForm={setWithdrawForm} wallet={paymentWallet} onSave={saveWithdraw} onClose={() => { setModal(null); setWithdrawForm(emptyWithdrawForm); }} loading={loading} />
-      <FinanceFormModal visible={modal === 'finance'} form={financeForm} setForm={setFinanceForm} onSave={saveFinance} onClose={() => setModal(null)} loading={loading} />
-      <AnnouncementFormModal visible={modal === 'announcement'} form={announcementForm} setForm={setAnnouncementForm} onSave={saveAnnouncement} onClose={() => setModal(null)} loading={loading} />
+      <FinanceFormModal visible={modal === 'finance'} form={financeForm} setForm={setFinanceForm} onSave={saveFinance} onClose={() => { setModal(null); setFinanceForm(emptyFinanceForm); }} loading={loading} />
+      <AnnouncementFormModal visible={modal === 'announcement'} form={announcementForm} setForm={setAnnouncementForm} onSave={saveAnnouncement} onClose={() => { setModal(null); setAnnouncementForm(emptyAnnouncementForm); }} loading={loading} />
     </View>
   );
 }
@@ -1297,7 +1466,7 @@ function BillsScreen({ bills, rooms, apiBase, openGenerate, openMultiPay, autoGe
   );
 }
 
-function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, downloadFinancePdf, announcements, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, setModal, logout }) {
+function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, openFinanceCreateModal, openFinanceEditModal, deleteFinance, downloadFinancePdf, announcements, openAnnouncementCreateModal, openAnnouncementEditModal, deleteAnnouncement, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, setModal, logout }) {
   const activeMethod = paymentMethods.find((item) => Number(item.is_active) === 1 || item.is_active === true);
   return (
     <>
@@ -1320,7 +1489,7 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
       )}
       {screen === 'finance' && (
         <>
-          <HeaderAction title="Keuangan" action="+ Transaksi" onPress={() => setModal('finance')} />
+          <HeaderAction title="Keuangan" action="+ Transaksi" onPress={openFinanceCreateModal} />
           <Pressable onPress={openPeriodModal} style={({ pressed }) => [styles.periodButton, pressed && styles.pressed]}>
             <Text style={styles.periodLabel}>Periode laporan</Text>
             <Text style={styles.periodValue}>{monthName(financeFilter.bulan)} {financeFilter.tahun}</Text>
@@ -1329,14 +1498,14 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
           <ProfitSummary summary={financeSummary} />
           <Text style={styles.sectionTitle}>Transaksi Manual</Text>
           <Text style={styles.muted}>Daftar ini berisi pemasukan/pengeluaran yang pemilik input sendiri, misalnya listrik, air, kebersihan, perbaikan, deposit, atau denda.</Text>
-          {finances.map((item) => <SimpleCard key={item.id} title={`${item.jenis} - ${money(item.nominal)}`} lines={[item.tanggal, item.keterangan || '-']} />)}
+          {finances.map((item) => <FinanceCard key={item.id} item={item} onEdit={() => openFinanceEditModal(item)} onDelete={() => deleteFinance(item)} />)}
           {finances.length === 0 ? <Empty text="Belum ada transaksi manual pada periode ini." /> : null}
         </>
       )}
       {screen === 'announcement' && (
         <>
-          <HeaderAction title="Pengumuman" action="+ Info" onPress={() => setModal('announcement')} />
-          {announcements.map((item) => <AnnouncementCard key={item.id} item={item} onToggle={() => toggleAnnouncement(item)} />)}
+          <HeaderAction title="Pengumuman" action="+ Info" onPress={openAnnouncementCreateModal} />
+          {announcements.map((item) => <AnnouncementCard key={item.id} item={item} onToggle={() => toggleAnnouncement(item)} onEdit={() => openAnnouncementEditModal(item)} onDelete={() => deleteAnnouncement(item)} />)}
           {announcements.length === 0 ? <Empty text="Belum ada pengumuman." /> : null}
         </>
       )}
@@ -1804,13 +1973,13 @@ function PaymentInfoModal({ visible, onClose }) {
 
 function FinanceFormModal({ visible, form, setForm, onSave, onClose, loading }) {
   return (
-    <BaseModal visible={visible} title="Transaksi Keuangan" onClose={onClose}>
+    <BaseModal visible={visible} title={form.id ? 'Edit Transaksi' : 'Tambah Transaksi'} onClose={onClose}>
       <Text style={styles.label}>Jenis</Text>
       <Segment items={['pemasukan', 'pengeluaran']} value={form.jenis} onChange={(jenis) => setForm({ ...form, jenis })} />
       <CompactDatePicker label="Tanggal transaksi" value={form.tanggal} onChange={(tanggal) => setForm({ ...form, tanggal })} />
       <FormField label="Nominal" value={form.nominal} onChangeText={(v) => setForm({ ...form, nominal: formatNumberInput(v) })} keyboardType="number-pad" helperText={form.nominal ? money(form.nominal) : 'Isi angka saja.'} />
       <FormField label="Keterangan" value={form.keterangan} onChangeText={(v) => setForm({ ...form, keterangan: v })} multiline />
-      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} />
+      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={form.id ? 'Simpan Perubahan' : 'Simpan'} />
     </BaseModal>
   );
 }
@@ -1902,12 +2071,12 @@ function CompactDatePicker({ label, value, onChange }) {
 
 function AnnouncementFormModal({ visible, form, setForm, onSave, onClose, loading }) {
   return (
-    <BaseModal visible={visible} title="Pengumuman" onClose={onClose}>
+    <BaseModal visible={visible} title={form.id ? 'Edit Pengumuman' : 'Tambah Pengumuman'} onClose={onClose}>
       <FormField label="Judul" value={form.judul} onChangeText={(v) => setForm({ ...form, judul: v })} />
       <FormField label="Isi pengumuman" value={form.isi} onChangeText={(v) => setForm({ ...form, isi: v })} multiline />
       <Text style={styles.label}>Status</Text>
       <Segment items={['aktif', 'nonaktif']} value={form.status} onChange={(status) => setForm({ ...form, status })} />
-      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} />
+      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={form.id ? 'Simpan Perubahan' : 'Simpan'} />
     </BaseModal>
   );
 }
@@ -1915,6 +2084,7 @@ function AnnouncementFormModal({ visible, form, setForm, onSave, onClose, loadin
 const facilityRows = [
   ['fasilitas_ac', 'AC'],
   ['fasilitas_km_dalam', 'Kamar mandi dalam'],
+  ['fasilitas_dapur_dalam', 'Dapur dalam'],
   ['fasilitas_wifi', 'WiFi'],
   ['fasilitas_kasur', 'Kasur'],
   ['fasilitas_lemari', 'Lemari'],
@@ -1940,6 +2110,7 @@ function roomToForm(room) {
     status: room.status || 'kosong',
     fasilitas_ac: isTruthy(room.fasilitas_ac),
     fasilitas_km_dalam: isTruthy(room.fasilitas_km_dalam),
+    fasilitas_dapur_dalam: isTruthy(room.fasilitas_dapur_dalam),
     fasilitas_wifi: isTruthy(room.fasilitas_wifi),
     fasilitas_kasur: isTruthy(room.fasilitas_kasur),
     fasilitas_lemari: isTruthy(room.fasilitas_lemari),
@@ -2229,7 +2400,25 @@ function InfoButton({ onPress }) {
   );
 }
 
-function AnnouncementCard({ item, onToggle }) {
+function FinanceCard({ item, onEdit, onDelete }) {
+  const typeLabel = item.jenis === 'pengeluaran' ? 'Pengeluaran' : 'Pemasukan';
+  return (
+    <View style={styles.card}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.cardTitle}>{typeLabel}</Text>
+        <Text style={[styles.badge, item.jenis === 'pengeluaran' ? styles.lossValue : styles.activeText]}>{money(item.nominal)}</Text>
+      </View>
+      <Text style={styles.muted}>{formatDate(item.tanggal)}</Text>
+      <Text style={styles.muted}>{item.keterangan || 'Tanpa keterangan'}</Text>
+      <View style={styles.actionRow}>
+        <SecondaryButton title="Edit" onPress={onEdit} style={styles.flexButton} />
+        <SecondaryButton title="Hapus" onPress={onDelete} style={[styles.flexButton, styles.dangerButton]} />
+      </View>
+    </View>
+  );
+}
+
+function AnnouncementCard({ item, onToggle, onEdit, onDelete }) {
   const active = item.status === 'aktif';
   return (
     <View style={styles.card}>
@@ -2239,6 +2428,10 @@ function AnnouncementCard({ item, onToggle }) {
       </View>
       <Text style={styles.muted}>{item.isi}</Text>
       <SecondaryButton title={active ? 'Nonaktifkan' : 'Aktifkan kembali'} onPress={onToggle} style={styles.cardButton} />
+      <View style={styles.actionRow}>
+        <SecondaryButton title="Edit" onPress={onEdit} style={styles.flexButton} />
+        <SecondaryButton title="Hapus" onPress={onDelete} style={[styles.flexButton, styles.dangerButton]} />
+      </View>
     </View>
   );
 }

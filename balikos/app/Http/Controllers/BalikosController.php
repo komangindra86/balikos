@@ -109,6 +109,7 @@ class BalikosController extends Controller
             'harga_max',
             'fasilitas_ac',
             'fasilitas_km_dalam',
+            'fasilitas_dapur_dalam',
             'fasilitas_wifi',
             'fasilitas_kasur',
             'fasilitas_lemari',
@@ -144,6 +145,7 @@ class BalikosController extends Controller
         $facilityFilters = [
             'fasilitas_ac' => 'AC',
             'fasilitas_km_dalam' => 'KM Dalam',
+            'fasilitas_dapur_dalam' => 'Dapur Dalam',
             'fasilitas_wifi' => 'WiFi',
             'fasilitas_kasur' => 'Kasur',
             'fasilitas_lemari' => 'Lemari',
@@ -328,7 +330,7 @@ class BalikosController extends Controller
             $query->where('kamars.harga_bulanan', '<=', (int) $filters['harga_max']);
         }
 
-        foreach (['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'] as $field) {
+        foreach (['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_dapur_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'] as $field) {
             if (! empty($filters[$field])) {
                 $query->where('kamars.'.$field, true);
             }

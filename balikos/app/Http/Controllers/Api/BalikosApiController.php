@@ -1381,6 +1381,7 @@ class BalikosApiController extends Controller
             'status' => [...$base, Rule::in(['kosong', 'terisi', 'maintenance'])],
             'fasilitas_ac' => ['sometimes', 'boolean'],
             'fasilitas_km_dalam' => ['sometimes', 'boolean'],
+            'fasilitas_dapur_dalam' => ['sometimes', 'boolean'],
             'fasilitas_wifi' => ['sometimes', 'boolean'],
             'fasilitas_kasur' => ['sometimes', 'boolean'],
             'fasilitas_lemari' => ['sometimes', 'boolean'],
@@ -1563,7 +1564,7 @@ class BalikosApiController extends Controller
 
     private function facilityFields(): array
     {
-        return ['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'];
+        return ['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_dapur_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'];
     }
 
     private function createInitialOccupantBill(int $penghuniId, string $paymentStatus, int $paidAmount): void

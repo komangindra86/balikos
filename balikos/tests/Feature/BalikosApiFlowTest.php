@@ -14,6 +14,65 @@ class BalikosApiFlowTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_room_data_is_isolated_between_owner_accounts(): void
+    {
+        $suffix = Str::lower(Str::random(8));
+        $registerOwner = function (string $name, string $email): array {
+            return $this->postJson('/api/balikos/register', [
+                'name' => $name,
+                'email' => $email,
+                'phone' => '081234567890',
+                'password' => 'password',
+                'password_confirmation' => 'password',
+                'device_name' => 'isolation-test',
+            ])->assertCreated()->json();
+        };
+
+        $ownerOne = $registerOwner('Owner One', "owner-one-{$suffix}@balikos.test");
+        $ownerTwo = $registerOwner('Owner Two', "owner-two-{$suffix}@balikos.test");
+
+        $kosOne = $this->withToken($ownerOne['token'])->postJson('/api/balikos/kos', [
+            'nama_kos' => 'Kos Owner One',
+            'alamat' => 'Alamat owner one',
+            'kecamatan' => 'Denpasar Selatan',
+            'no_wa' => '081111111111',
+            'status' => 'aktif',
+        ])->assertCreated()->json('data');
+        $kosTwo = $this->withToken($ownerTwo['token'])->postJson('/api/balikos/kos', [
+            'nama_kos' => 'Kos Owner Two',
+            'alamat' => 'Alamat owner two',
+            'kecamatan' => 'Denpasar Barat',
+            'no_wa' => '082222222222',
+            'status' => 'aktif',
+        ])->assertCreated()->json('data');
+
+        $roomOne = $this->withToken($ownerOne['token'])->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosOne['id'],
+            'nomor_kamar' => 'OWNER-ONE',
+            'tipe_kamar' => 'Standard',
+            'harga_bulanan' => 1000000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+        $roomTwo = $this->withToken($ownerTwo['token'])->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosTwo['id'],
+            'nomor_kamar' => 'OWNER-TWO',
+            'tipe_kamar' => 'Standard',
+            'harga_bulanan' => 1100000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+
+        $ownerOneRooms = $this->withToken($ownerOne['token'])
+            ->getJson('/api/balikos/kamar')
+            ->assertOk()
+            ->json('data');
+
+        $this->assertContains($roomOne['id'], collect($ownerOneRooms)->pluck('id')->all());
+        $this->assertNotContains($roomTwo['id'], collect($ownerOneRooms)->pluck('id')->all());
+        $this->withToken($ownerOne['token'])
+            ->getJson('/api/balikos/kamar?kos_id='.$kosTwo['id'])
+            ->assertForbidden();
+    }
+
     public function test_owner_can_fill_empty_room_and_generate_room_bill(): void
     {
         $login = $this->postJson('/api/balikos/login', [
@@ -34,6 +93,7 @@ class BalikosApiFlowTest extends TestCase
             'status' => 'kosong',
             'fasilitas_wifi' => true,
             'fasilitas_km_dalam' => true,
+            'fasilitas_dapur_dalam' => true,
         ])->assertCreated()->json('data');
 
         $penghuni = $this->withToken($token)->postJson('/api/balikos/penghuni', [
@@ -64,7 +124,8 @@ class BalikosApiFlowTest extends TestCase
 
         $this->withToken($token)->getJson('/api/balikos/kamar/'.$room['id'])
             ->assertOk()
-            ->assertJsonPath('data.penghuni_aktif.id', $penghuni['id']);
+            ->assertJsonPath('data.penghuni_aktif.id', $penghuni['id'])
+            ->assertJsonPath('data.fasilitas_dapur_dalam', 1);
 
         $this->withToken($token)->postJson('/api/balikos/tagihan/generate', [
             'kos_id' => $kosId,
@@ -199,7 +260,7 @@ class BalikosApiFlowTest extends TestCase
             'is_active' => true,
         ])->assertCreated()->assertJsonPath('data.nama_bank', 'BCA Test');
 
-        $this->withToken($token)->postJson('/api/balikos/keuangan', [
+        $finance = $this->withToken($token)->postJson('/api/balikos/keuangan', [
             'kos_id' => $kosId,
             'jenis' => 'pengeluaran',
             'tanggal' => now()->toDateString(),
@@ -207,22 +268,49 @@ class BalikosApiFlowTest extends TestCase
             'keterangan' => 'Beli alat kebersihan',
         ])->assertCreated()->assertJsonPath('data.nominal', 50000);
 
+        $financeId = $finance->json('data.id');
+        $this->withToken($token)->putJson('/api/balikos/keuangan/'.$financeId, [
+            'kos_id' => $kosId,
+            'jenis' => 'pengeluaran',
+            'tanggal' => now()->toDateString(),
+            'nominal' => 60000,
+            'keterangan' => 'Beli alat kebersihan dan sabun',
+        ])->assertOk()
+            ->assertJsonPath('data.nominal', 60000)
+            ->assertJsonPath('data.keterangan', 'Beli alat kebersihan dan sabun');
+
         $this->withToken($token)->getJson('/api/balikos/keuangan?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'))
             ->assertOk()
-            ->assertJsonPath('summary.pengeluaran', 50000)
-            ->assertJsonPath('summary.laba_rugi', -50000)
+            ->assertJsonPath('summary.pengeluaran', 60000)
+            ->assertJsonPath('summary.laba_rugi', -60000)
             ->assertJsonPath('summary.status', 'rugi');
 
         $pdf = $this->withToken($token)->get('/api/balikos/keuangan/laporan-pdf?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'));
         $pdf->assertOk();
         $this->assertStringStartsWith('%PDF', $pdf->getContent());
 
-        $this->withToken($token)->postJson('/api/balikos/pengumuman', [
+        $announcement = $this->withToken($token)->postJson('/api/balikos/pengumuman', [
             'kos_id' => $kosId,
             'judul' => 'Info Test',
             'isi' => 'Air mati jam 10 malam.',
             'status' => 'aktif',
         ])->assertCreated()->assertJsonPath('data.judul', 'Info Test');
+
+        $announcementId = $announcement->json('data.id');
+        $this->withToken($token)->putJson('/api/balikos/pengumuman/'.$announcementId, [
+            'kos_id' => $kosId,
+            'judul' => 'Info Test Diperbarui',
+            'isi' => 'Air kembali menyala jam 11 malam.',
+            'status' => 'nonaktif',
+        ])->assertOk()
+            ->assertJsonPath('data.judul', 'Info Test Diperbarui')
+            ->assertJsonPath('data.status', 'nonaktif');
+
+        $this->withToken($token)->deleteJson('/api/balikos/pengumuman/'.$announcementId)->assertOk();
+        $this->assertFalse(DB::table('pengumuman_kos')->where('id', $announcementId)->exists());
+
+        $this->withToken($token)->deleteJson('/api/balikos/keuangan/'.$financeId)->assertOk();
+        $this->assertFalse(DB::table('transaksi_keuangan')->where('id', $financeId)->exists());
     }
 
     public function test_new_occupant_initial_payment_creates_first_bill(): void
