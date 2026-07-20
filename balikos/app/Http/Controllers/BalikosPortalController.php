@@ -6,12 +6,13 @@ use App\Services\Balikos\XenditInvoiceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use Throwable;
 
 class BalikosPortalController extends Controller
 {
-    public function __construct(private readonly XenditInvoiceService $xendit)
-    {
-    }
+    public function __construct(private readonly XenditInvoiceService $xendit) {}
 
     public function show(string $token)
     {
@@ -126,7 +127,25 @@ class BalikosPortalController extends Controller
             ->first();
         abort_if(! $method, 422, 'Metode QRIS belum aktif untuk kos ini.');
 
-        $bill = $this->xendit->ensureInvoiceForBill($bill, $token);
+        try {
+            $bill = $this->xendit->ensureInvoiceForBill($bill, $token);
+        } catch (HttpExceptionInterface $exception) {
+            Log::warning('Portal QRIS payment failed', [
+                'tagihan_id' => $tagihan,
+                'status' => $exception->getStatusCode(),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('balikos.portal.show', $token)
+                ->with('error', $exception->getMessage());
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->route('balikos.portal.show', $token)
+                ->with('error', 'Pembayaran QRIS belum dapat dibuka. Silakan coba beberapa saat lagi.');
+        }
 
         return redirect()->away($bill->gateway_invoice_url);
     }
@@ -162,6 +181,7 @@ class BalikosPortalController extends Controller
                 $bill->biaya_platform = (int) ($bill->biaya_platform ?: ceil(((int) $bill->sisa_tagihan) * 0.01));
                 $bill->total_dibayar = (int) ($bill->total_dibayar ?: ((int) $bill->sisa_tagihan + (int) $bill->biaya_platform));
                 $bill->qris_payment_url = route('balikos.portal.pay-qris', [$token, $bill->id]);
+
                 return $bill;
             });
         }
@@ -197,7 +217,7 @@ class BalikosPortalController extends Controller
 
         try {
             Http::timeout(5)->post('https://exp.host/--/api/v2/push/send', $messages);
-        } catch (\Throwable) {
+        } catch (Throwable) {
             //
         }
     }

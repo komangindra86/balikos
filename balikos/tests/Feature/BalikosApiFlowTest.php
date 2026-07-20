@@ -479,20 +479,64 @@ class BalikosApiFlowTest extends TestCase
         ])->assertOk();
 
         $tagihan = DB::table('tagihans')->where('penghuni_id', $penghuni['id'])->first();
-        $expectedReference = 'balikos-tagihan-'.$tagihan->id;
+        $environment = substr(hash('sha256', config('app.url').'|'.config('app.env')), 0, 10);
+        $expectedReference = 'balikos-'.$environment.'-tagihan-'.$tagihan->id;
 
-        Http::fake([
-            'https://api.xendit.co/v2/invoices' => Http::response([
-                'id' => 'inv-test-'.$tagihan->id,
-                'external_id' => $expectedReference,
-                'status' => 'PENDING',
-                'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
-            ], 200),
-        ]);
+        $invoicePostAttempts = 0;
+        Http::fake(function ($request) use (&$invoicePostAttempts, $expectedReference, $tagihan) {
+            if ($request->method() === 'GET') {
+                return Http::response([[
+                    'id' => 'inv-test-'.$tagihan->id,
+                    'external_id' => $expectedReference,
+                    'amount' => 1010000,
+                    'status' => 'PENDING',
+                    'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
+                ]], 200);
+            }
+
+            $invoicePostAttempts++;
+            if ($invoicePostAttempts === 1) {
+                return Http::response([
+                    'error_code' => 'REQUEST_FORBIDDEN_ERROR',
+                    'message' => 'QRIS is not available.',
+                ], 403);
+            }
+            if ($invoicePostAttempts === 2) {
+                return Http::response([
+                    'id' => 'inv-test-'.$tagihan->id,
+                    'external_id' => $expectedReference,
+                    'amount' => 1010000,
+                    'status' => 'PENDING',
+                    'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
+                ], 200);
+            }
+
+            return Http::response([
+                'error_code' => 'DUPLICATE_ERROR',
+                'message' => 'Invoice with this external ID already exists.',
+            ], 409);
+        });
+        $this->get('/balikos/portal/'.$penghuni['portal_token'].'/tagihan/'.$tagihan->id.'/qris')
+            ->assertRedirect(route('balikos.portal.show', $penghuni['portal_token']))
+            ->assertSessionHas('error', 'Gagal membuat link QRIS. Silakan coba lagi beberapa saat.');
 
         $this->getJson('/api/balikos/portal/'.$penghuni['portal_token'].'/tagihan/'.$tagihan->id.'/qris')
             ->assertOk()
             ->assertJsonPath('data.invoice_url', 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id);
+
+        DB::table('tagihans')->where('id', $tagihan->id)->update([
+            'gateway_invoice_id' => null,
+            'gateway_invoice_url' => null,
+            'gateway_status' => null,
+            'gateway_payload' => null,
+        ]);
+        $this->getJson('/api/balikos/portal/'.$penghuni['portal_token'].'/tagihan/'.$tagihan->id.'/qris')
+            ->assertOk()
+            ->assertJsonPath('data.invoice_url', 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id);
+        $this->assertSame(
+            'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
+            DB::table('tagihans')->where('id', $tagihan->id)->value('gateway_invoice_url')
+        );
 
         $walletId = DB::table('kos_wallets')->where('kos_id', $kosId)->value('id');
         DB::table('kos_wallets')->where('id', $walletId)->update(['saldo_tersedia' => 0]);

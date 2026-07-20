@@ -1,4 +1,4 @@
-const CACHE_NAME = 'balikos-portal-v5';
+const CACHE_NAME = 'balikos-portal-v6';
 const CORE_ASSETS = [
   '/balikos-portal.webmanifest',
   '/balikos-portal-icon.svg'
@@ -19,13 +19,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  const isQrisPayment = /\/tagihan\/\d+\/qris\/?$/.test(url.pathname);
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || isQrisPayment) return;
+
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        if (response.ok && response.type === 'basic') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
         return response;
       })
-      .catch(() => caches.match(request))
+      .catch(async () => (await caches.match(request)) || Response.error())
   );
 });

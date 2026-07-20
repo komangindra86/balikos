@@ -53,6 +53,7 @@
         .secondary { display:block; text-align:center; border:1px solid var(--line); background:white; color:var(--teal); text-decoration:none; border-radius:14px; padding:12px 16px; font-weight:900; }
         input[type=file], input[type=date] { width:100%; border:1px solid var(--line); border-radius:14px; min-height:48px; padding:12px; background:white; margin:8px 0 12px; }
         .success { background:#e8f7ef; border-color:#bfe7d0; color:#136d47; }
+        .error { background:#fff1f1; border-color:#efb7b7; color:#9f2f2f; }
         .warning { background:#fff8e8; border-color:#f1d38b; }
         .paybox { background:var(--soft); border:1px solid var(--line); border-radius:16px; padding:14px; margin-top:12px; }
         .note-box { background:var(--soft); border:1px solid var(--line); border-radius:16px; padding:12px; margin-top:12px; }
@@ -78,6 +79,10 @@
 
         @if (session('success'))
             <div class="card success">{{ session('success') }}</div>
+        @endif
+
+        @if (session('error'))
+            <div class="card error">{{ session('error') }}</div>
         @endif
 
         @if ($announcements->isNotEmpty())
@@ -233,7 +238,10 @@
         }
 
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/balikos-portal-sw.js').catch(() => {});
+            navigator.serviceWorker
+                .register('/balikos-portal-sw.js', { updateViaCache: 'none' })
+                .then((registration) => registration.update())
+                .catch(() => {});
         }
 
         window.addEventListener('beforeinstallprompt', (event) => {
