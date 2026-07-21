@@ -55,6 +55,7 @@ Route::prefix('balikos')->group(function () {
         Route::post('/tagihan/auto-generate', [BalikosApiController::class, 'tagihanAutoGenerate']);
         Route::post('/tagihan/bayar-multi', [BalikosApiController::class, 'tagihanBayarMulti']);
         Route::get('/tagihan/{id}', [BalikosApiController::class, 'tagihanShow'])->whereNumber('id');
+        Route::put('/tagihan/{id}/pembayaran-awal', [BalikosApiController::class, 'tagihanKoreksiPembayaranAwal'])->whereNumber('id');
         Route::put('/tagihan/{id}/lunas', [BalikosApiController::class, 'tagihanLunas'])->whereNumber('id');
         Route::put('/tagihan/{id}/verifikasi', [BalikosApiController::class, 'tagihanVerifikasi'])->whereNumber('id');
         Route::put('/tagihan/{id}/tolak', [BalikosApiController::class, 'tagihanTolak'])->whereNumber('id');

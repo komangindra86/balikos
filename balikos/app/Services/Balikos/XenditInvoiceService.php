@@ -218,15 +218,18 @@ class XenditInvoiceService
             ];
 
             if ($status === 'PAID' && $bill->status !== 'lunas' && $paidAmount >= (int) $bill->total_dibayar) {
+                $rentPaidNow = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+                $paymentDate = isset($payload['paid_at']) ? Carbon::parse($payload['paid_at'])->toDateString() : now()->toDateString();
                 $update = array_merge($update, [
                     'status' => 'lunas',
-                    'tanggal_bayar' => isset($payload['paid_at']) ? Carbon::parse($payload['paid_at'])->toDateString() : now()->toDateString(),
+                    'tanggal_bayar' => $paymentDate,
                     'metode_pembayaran' => 'qris',
                     'nominal_terbayar' => (int) $bill->nominal,
                     'tanggal_verifikasi' => now(),
                     'tanggal_konfirmasi' => now(),
                     'alasan_penolakan' => null,
                 ]);
+                $this->recordRentPayment($bill, $rentPaidNow, $paymentDate);
                 $this->creditWalletOnce($bill);
             }
 
@@ -276,6 +279,26 @@ class XenditInvoiceService
         $amount = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
         DB::table('kos_wallets')->where('id', $wallet->id)->update([
             'saldo_tersedia' => DB::raw('saldo_tersedia + '.$amount),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function recordRentPayment(object $bill, int $amount, string $paymentDate): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+
+        DB::table('tagihan_pembayarans')->insert([
+            'tagihan_id' => $bill->id,
+            'kos_id' => $bill->kos_id,
+            'penghuni_id' => $bill->penghuni_id,
+            'nominal' => $amount,
+            'tanggal_bayar' => $paymentDate,
+            'metode_pembayaran' => 'qris',
+            'sumber' => 'xendit',
+            'catatan' => 'Pembayaran QRIS otomatis.',
+            'created_at' => now(),
             'updated_at' => now(),
         ]);
     }

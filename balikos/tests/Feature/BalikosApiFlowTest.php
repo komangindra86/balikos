@@ -279,11 +279,15 @@ class BalikosApiFlowTest extends TestCase
             ->assertJsonPath('data.nominal', 60000)
             ->assertJsonPath('data.keterangan', 'Beli alat kebersihan dan sabun');
 
-        $this->withToken($token)->getJson('/api/balikos/keuangan?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'))
+        $summary = $this->withToken($token)->getJson('/api/balikos/keuangan?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'))
             ->assertOk()
             ->assertJsonPath('summary.pengeluaran', 60000)
-            ->assertJsonPath('summary.laba_rugi', -60000)
-            ->assertJsonPath('summary.status', 'rugi');
+            ->assertJsonPath('summary.status', 'rugi')
+            ->json('summary');
+        $this->assertSame(
+            (int) $summary['total_pemasukan'] - (int) $summary['pengeluaran'] - (int) $summary['kerugian_tunggakan'],
+            (int) $summary['laba_rugi']
+        );
 
         $pdf = $this->withToken($token)->get('/api/balikos/keuangan/laporan-pdf?kos_id='.$kosId.'&bulan='.(int) now()->format('m').'&tahun='.(int) now()->format('Y'));
         $pdf->assertOk();
@@ -374,6 +378,70 @@ class BalikosApiFlowTest extends TestCase
         $lunasBill = DB::table('tagihans')->where('penghuni_id', $lunasOccupant['id'])->first();
         $this->assertSame(900000, (int) $lunasBill->nominal_terbayar);
         $this->assertSame('lunas', $lunasBill->status);
+    }
+
+    public function test_dp_is_reported_corrected_and_remaining_balance_becomes_checkout_loss(): void
+    {
+        $suffix = Str::lower(Str::random(8));
+        $owner = $this->postJson('/api/balikos/register', [
+            'name' => 'Owner DP',
+            'email' => "owner-dp-{$suffix}@balikos.test",
+            'phone' => '081234567890',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'device_name' => 'dp-test',
+        ])->assertCreated()->json();
+
+        $kos = $this->withToken($owner['token'])->postJson('/api/balikos/kos', [
+            'nama_kos' => 'Kos DP',
+            'alamat' => 'Alamat tes DP',
+            'kecamatan' => 'Denpasar',
+            'no_wa' => '081234567890',
+            'status' => 'aktif',
+        ])->assertCreated()->json('data');
+        $room = $this->withToken($owner['token'])->postJson('/api/balikos/kamar', [
+            'kos_id' => $kos['id'],
+            'nomor_kamar' => 'DP-1',
+            'tipe_kamar' => 'Standard',
+            'harga_bulanan' => 1000000,
+            'status' => 'kosong',
+        ])->assertCreated()->json('data');
+        $occupant = $this->withToken($owner['token'])->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kos['id'],
+            'kamar_id' => $room['id'],
+            'nama_lengkap' => 'Penghuni DP',
+            'tanggal_masuk' => '2026-07-20',
+            'status' => 'aktif',
+            'pembayaran_awal' => 'dp',
+            'nominal_pembayaran_awal' => 500000,
+        ])->assertCreated()->json('data');
+        $bill = DB::table('tagihans')->where('penghuni_id', $occupant['id'])->first();
+
+        $this->assertSame(500000, (int) DB::table('tagihan_pembayarans')->where('tagihan_id', $bill->id)->sum('nominal'));
+        $this->withToken($owner['token'])
+            ->getJson('/api/balikos/keuangan?kos_id='.$kos['id'].'&bulan=7&tahun=2026')
+            ->assertOk()
+            ->assertJsonPath('summary.pendapatan_sewa', 500000)
+            ->assertJsonPath('summary.laba_rugi', 500000);
+
+        $this->withToken($owner['token'])->putJson('/api/balikos/tagihan/'.$bill->id.'/pembayaran-awal', [
+            'nominal' => 600000,
+            'tanggal_bayar' => '2026-07-20',
+        ])->assertOk()->assertJsonPath('data.nominal_terbayar', 600000);
+        $this->assertSame(600000, (int) DB::table('tagihan_pembayarans')->where('tagihan_id', $bill->id)->sum('nominal'));
+
+        $this->withToken($owner['token'])->putJson('/api/balikos/penghuni/'.$occupant['id'], [
+            'status' => 'keluar',
+            'tanggal_keluar' => '2026-07-21',
+        ])->assertOk();
+
+        $this->assertSame(400000, (int) DB::table('tagihans')->where('id', $bill->id)->value('kerugian_tunggakan'));
+        $this->withToken($owner['token'])
+            ->getJson('/api/balikos/keuangan?kos_id='.$kos['id'].'&bulan=7&tahun=2026')
+            ->assertOk()
+            ->assertJsonPath('summary.pendapatan_sewa', 600000)
+            ->assertJsonPath('summary.kerugian_tunggakan', 400000)
+            ->assertJsonPath('summary.laba_rugi', 200000);
     }
 
     public function test_qris_verification_is_idempotent_for_wallet_credit(): void

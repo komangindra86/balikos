@@ -4,14 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\Balikos\XenditInvoiceService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Barryvdh\DomPDF\Facade\Pdf;
 
 class BalikosApiController extends Controller
 {
@@ -463,7 +464,13 @@ class BalikosApiController extends Controller
         $data['active_kamar_id'] = $data['status'] === 'aktif' ? $data['kamar_id'] : null;
         $data['updated_at'] = now();
 
-        DB::table('penghunis')->where('id', $id)->update($data);
+        DB::transaction(function () use ($id, $data, $row): void {
+            DB::table('penghunis')->where('id', $id)->update($data);
+
+            if ($data['status'] === 'keluar' && $row->status !== 'keluar') {
+                $this->recordOutstandingLossForCheckout($id, $data['tanggal_keluar'] ?? now()->toDateString());
+            }
+        });
         $this->syncRoomStatus((int) $row->kamar_id);
         $this->syncRoomStatus((int) $data['kamar_id']);
 
@@ -700,15 +707,28 @@ class BalikosApiController extends Controller
             $billIds = array_merge($billIds, $ids);
         }
 
-        DB::table('tagihans')->whereIn('id', $billIds)->update([
-            'status' => 'lunas',
-            'tanggal_bayar' => $data['tanggal_bayar'] ?? now()->toDateString(),
-            'metode_pembayaran' => $data['metode_pembayaran'] ?? 'tunai',
-            'nominal_terbayar' => DB::raw('nominal'),
-            'tanggal_verifikasi' => now(),
-            'diverifikasi_oleh' => $this->user($request)->id,
-            'updated_at' => now(),
-        ]);
+        DB::transaction(function () use ($billIds, $data, $request): void {
+            foreach (array_unique($billIds) as $billId) {
+                $bill = DB::table('tagihans')->where('id', $billId)->lockForUpdate()->first();
+                if (! $bill || $bill->status === 'lunas') {
+                    continue;
+                }
+
+                $paidNow = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+                $paymentDate = $data['tanggal_bayar'] ?? now()->toDateString();
+                $method = $data['metode_pembayaran'] ?? 'tunai';
+                DB::table('tagihans')->where('id', $billId)->update([
+                    'status' => 'lunas',
+                    'tanggal_bayar' => $paymentDate,
+                    'metode_pembayaran' => $method,
+                    'nominal_terbayar' => (int) $bill->nominal,
+                    'tanggal_verifikasi' => now(),
+                    'diverifikasi_oleh' => $this->user($request)->id,
+                    'updated_at' => now(),
+                ]);
+                $this->recordRentPayment($bill, $paidNow, $paymentDate, $method, 'bayar_multi', $this->user($request)->id);
+            }
+        });
 
         return response()->json(['message' => 'Pembayaran multi-bulan berhasil dicatat.', 'total' => count(array_unique($billIds))]);
     }
@@ -731,6 +751,69 @@ class BalikosApiController extends Controller
         return response()->json(['data' => $this->billWithUrls($this->ownedRow($request, 'tagihans', $id))]);
     }
 
+    public function tagihanKoreksiPembayaranAwal(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'nominal' => ['required', 'integer', 'min:0'],
+            'tanggal_bayar' => ['required', 'date'],
+        ]);
+        $this->ownedRow($request, 'tagihans', $id);
+
+        DB::transaction(function () use ($request, $id, $data): void {
+            $bill = $this->lockedOwnedBill($request, $id);
+            abort_if((int) ($bill->kerugian_tunggakan ?? 0) > 0, 422, 'Tunggakan ini sudah tercatat sebagai kerugian dan DP tidak dapat dikoreksi.');
+            abort_if($bill->status === 'lunas', 422, 'Pembayaran awal tidak dapat dikoreksi setelah tagihan lunas.');
+
+            $initial = DB::table('tagihan_pembayarans')
+                ->where('tagihan_id', $id)
+                ->where('sumber', 'pembayaran_awal')
+                ->lockForUpdate()
+                ->first();
+            abort_if(! $initial, 422, 'Tagihan ini tidak memiliki pembayaran awal yang dapat dikoreksi.');
+
+            $otherPayments = (int) DB::table('tagihan_pembayarans')
+                ->where('tagihan_id', $id)
+                ->where('id', '!=', $initial->id)
+                ->sum('nominal');
+            abort_if($otherPayments > 0, 422, 'DP tidak dapat dikoreksi setelah ada pembayaran berikutnya.');
+            abort_if((int) $data['nominal'] > (int) $bill->nominal, 422, 'Nominal DP tidak boleh melebihi harga sewa kamar.');
+
+            $paid = (int) $data['nominal'];
+            $remaining = max(0, (int) $bill->nominal - $paid);
+            $fee = $remaining > 0 && $this->activeQrisMethod((int) $bill->kos_id) ? $this->qrisFee($remaining) : 0;
+
+            if ($paid === 0) {
+                DB::table('tagihan_pembayarans')->where('id', $initial->id)->delete();
+            } else {
+                DB::table('tagihan_pembayarans')->where('id', $initial->id)->update([
+                    'nominal' => $paid,
+                    'tanggal_bayar' => $data['tanggal_bayar'],
+                    'catatan' => 'DP masuk kamar (dikoreksi).',
+                    'updated_at' => now(),
+                ]);
+            }
+
+            DB::table('tagihans')->where('id', $id)->update([
+                'status' => $remaining === 0 ? 'lunas' : 'belum_lunas',
+                'nominal_terbayar' => $paid,
+                'tanggal_bayar' => $paid > 0 ? $data['tanggal_bayar'] : null,
+                'metode_pembayaran' => $paid > 0 ? 'dp' : null,
+                'biaya_platform' => $fee,
+                'total_dibayar' => $remaining + $fee,
+                'tanggal_verifikasi' => $remaining === 0 ? now() : null,
+                'catatan' => $paid > 0 && $remaining > 0 ? 'DP masuk kamar: Rp '.number_format($paid, 0, ',', '.') : null,
+                'gateway_reference' => null,
+                'gateway_invoice_id' => null,
+                'gateway_invoice_url' => null,
+                'gateway_status' => null,
+                'gateway_payload' => null,
+                'updated_at' => now(),
+            ]);
+        });
+
+        return response()->json(['message' => 'Pembayaran awal berhasil dikoreksi.', 'data' => $this->billWithUrls($this->ownedRow($request, 'tagihans', $id))]);
+    }
+
     public function tagihanLunas(Request $request, int $id)
     {
         $this->ownedRow($request, 'tagihans', $id);
@@ -742,10 +825,12 @@ class BalikosApiController extends Controller
             }
 
             $method = $request->input('metode_pembayaran', 'tunai');
-            $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
+            $paidNow = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+            $fee = $method === 'qris' ? $this->qrisFee($paidNow) : 0;
+            $paymentDate = $request->input('tanggal_bayar', now()->toDateString());
             DB::table('tagihans')->where('id', $id)->update([
                 'status' => 'lunas',
-                'tanggal_bayar' => $request->input('tanggal_bayar', now()->toDateString()),
+                'tanggal_bayar' => $paymentDate,
                 'metode_pembayaran' => $method,
                 'nominal_terbayar' => (int) $bill->nominal,
                 'biaya_platform' => $fee,
@@ -754,6 +839,7 @@ class BalikosApiController extends Controller
                 'diverifikasi_oleh' => $this->user($request)->id,
                 'updated_at' => now(),
             ]);
+            $this->recordRentPayment($bill, $paidNow, $paymentDate, $method, 'lunas_manual', $this->user($request)->id);
             if ($method === 'qris') {
                 $this->creditQrisPayment($bill);
             }
@@ -773,11 +859,13 @@ class BalikosApiController extends Controller
             }
 
             $method = $bill->metode_pembayaran ?: ($this->activeQrisMethod((int) $bill->kos_id) ? 'qris' : 'transfer');
-            $fee = $method === 'qris' ? $this->qrisFee((int) $bill->nominal) : 0;
+            $paidNow = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+            $fee = $method === 'qris' ? $this->qrisFee($paidNow) : 0;
+            $paymentDate = now()->toDateString();
             DB::table('tagihans')->where('id', $id)->update([
                 'status' => 'lunas',
                 'tanggal_verifikasi' => now(),
-                'tanggal_bayar' => now()->toDateString(),
+                'tanggal_bayar' => $paymentDate,
                 'metode_pembayaran' => $method,
                 'nominal_terbayar' => (int) $bill->nominal,
                 'biaya_platform' => $fee,
@@ -785,6 +873,7 @@ class BalikosApiController extends Controller
                 'diverifikasi_oleh' => $this->user($request)->id,
                 'updated_at' => now(),
             ]);
+            $this->recordRentPayment($bill, $paidNow, $paymentDate, $method, 'verifikasi', $this->user($request)->id);
             if ($method === 'qris') {
                 $this->creditQrisPayment($bill);
             }
@@ -1133,27 +1222,49 @@ class BalikosApiController extends Controller
             ->where('jenis', 'pengeluaran')
             ->whereMonth('tanggal', $bulan)
             ->whereYear('tanggal', $tahun);
-        $rentQuery = DB::table('tagihans')
+        $rentQuery = DB::table('tagihan_pembayarans')
+            ->join('tagihans', 'tagihans.id', '=', 'tagihan_pembayarans.tagihan_id')
+            ->leftJoin('kamars', 'kamars.id', '=', 'tagihans.kamar_id')
+            ->leftJoin('penghunis', 'penghunis.id', '=', 'tagihans.penghuni_id')
+            ->whereIn('tagihan_pembayarans.kos_id', $kosIds)
+            ->whereMonth('tagihan_pembayarans.tanggal_bayar', $bulan)
+            ->whereYear('tagihan_pembayarans.tanggal_bayar', $tahun);
+        $lossQuery = DB::table('tagihans')
             ->leftJoin('kamars', 'kamars.id', '=', 'tagihans.kamar_id')
             ->leftJoin('penghunis', 'penghunis.id', '=', 'tagihans.penghuni_id')
             ->whereIn('tagihans.kos_id', $kosIds)
-            ->where('tagihans.status', 'lunas')
-            ->where('tagihans.bulan', $bulan)
-            ->where('tagihans.tahun', $tahun);
+            ->where('tagihans.kerugian_tunggakan', '>', 0)
+            ->whereMonth('tagihans.tanggal_kerugian', $bulan)
+            ->whereYear('tagihans.tanggal_kerugian', $tahun);
 
         if ($kosId) {
             $incomeQuery->where('kos_id', $kosId);
             $expenseQuery->where('kos_id', $kosId);
-            $rentQuery->where('tagihans.kos_id', $kosId);
+            $rentQuery->where('tagihan_pembayarans.kos_id', $kosId);
+            $lossQuery->where('tagihans.kos_id', $kosId);
         }
 
         $rentRows = (clone $rentQuery)
             ->orderBy('kamars.nomor_kamar')
             ->get([
+                'tagihan_pembayarans.id',
+                'tagihan_pembayarans.nominal',
+                'tagihan_pembayarans.tanggal_bayar',
+                'tagihan_pembayarans.metode_pembayaran',
+                'tagihan_pembayarans.sumber',
+                'tagihans.bulan',
+                'tagihans.tahun',
+                'kamars.nomor_kamar',
+                'penghunis.nama_lengkap',
+            ]);
+        $lossRows = (clone $lossQuery)
+            ->orderBy('kamars.nomor_kamar')
+            ->get([
                 'tagihans.id',
-                'tagihans.nominal',
-                'tagihans.tanggal_bayar',
-                'tagihans.metode_pembayaran',
+                'tagihans.kerugian_tunggakan as nominal',
+                'tagihans.tanggal_kerugian',
+                'tagihans.bulan',
+                'tagihans.tahun',
                 'kamars.nomor_kamar',
                 'penghunis.nama_lengkap',
             ]);
@@ -1162,13 +1273,15 @@ class BalikosApiController extends Controller
         $pendapatanSewa = (int) $rentRows->sum('nominal');
         $pemasukanLain = (int) $incomeQuery->sum('nominal');
         $pengeluaran = (int) $expenseQuery->sum('nominal');
+        $kerugianTunggakan = (int) $lossRows->sum('nominal');
         $totalPemasukan = $pendapatanSewa + $pemasukanLain;
-        $labaRugi = $totalPemasukan - $pengeluaran;
+        $labaRugi = $totalPemasukan - $pengeluaran - $kerugianTunggakan;
 
         return [
             'kos' => $kos,
             'transactions' => $transactions,
             'rentBills' => $rentRows,
+            'lossBills' => $lossRows,
             'summary' => [
                 'bulan' => $bulan,
                 'tahun' => $tahun,
@@ -1176,6 +1289,7 @@ class BalikosApiController extends Controller
                 'pemasukan_lain' => $pemasukanLain,
                 'total_pemasukan' => $totalPemasukan,
                 'pengeluaran' => $pengeluaran,
+                'kerugian_tunggakan' => $kerugianTunggakan,
                 'laba_rugi' => $labaRugi,
                 'margin_persen' => $totalPemasukan > 0 ? round(($labaRugi / $totalPemasukan) * 100, 1) : 0,
                 'status' => $labaRugi >= 0 ? 'untung' : 'rugi',
@@ -1334,6 +1448,12 @@ class BalikosApiController extends Controller
             $row->total_dibayar = in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak', 'menunggu_verifikasi'], true)
                 ? (int) $row->sisa_tagihan + $fee
                 : (int) ($row->total_dibayar ?? ((int) $row->nominal + $fee));
+            $row->bisa_koreksi_dp = (int) ($row->kerugian_tunggakan ?? 0) === 0
+                && $row->status !== 'lunas'
+                && DB::table('tagihan_pembayarans')
+                    ->where('tagihan_id', $row->id)
+                    ->where('sumber', 'pembayaran_awal')
+                    ->exists();
         }
 
         return $row;
@@ -1567,6 +1687,48 @@ class BalikosApiController extends Controller
         return ['fasilitas_ac', 'fasilitas_km_dalam', 'fasilitas_dapur_dalam', 'fasilitas_wifi', 'fasilitas_kasur', 'fasilitas_lemari', 'fasilitas_meja', 'fasilitas_parkir'];
     }
 
+    private function recordRentPayment(object $bill, int $amount, string $paymentDate, ?string $method, string $source, ?int $userId = null): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+
+        DB::table('tagihan_pembayarans')->insert([
+            'tagihan_id' => $bill->id,
+            'kos_id' => $bill->kos_id,
+            'penghuni_id' => $bill->penghuni_id,
+            'nominal' => $amount,
+            'tanggal_bayar' => $paymentDate,
+            'metode_pembayaran' => $method,
+            'sumber' => $source,
+            'created_by' => $userId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function recordOutstandingLossForCheckout(int $penghuniId, string $checkoutDate): void
+    {
+        $bills = DB::table('tagihans')
+            ->where('penghuni_id', $penghuniId)
+            ->whereIn('status', ['belum_lunas', 'terlambat', 'ditolak'])
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($bills as $bill) {
+            $remaining = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
+            if ($remaining === 0 || (int) ($bill->kerugian_tunggakan ?? 0) > 0) {
+                continue;
+            }
+
+            DB::table('tagihans')->where('id', $bill->id)->update([
+                'kerugian_tunggakan' => $remaining,
+                'tanggal_kerugian' => $checkoutDate,
+                'updated_at' => now(),
+            ]);
+        }
+    }
+
     private function createInitialOccupantBill(int $penghuniId, string $paymentStatus, int $paidAmount): void
     {
         $penghuni = DB::table('penghunis')
@@ -1579,7 +1741,7 @@ class BalikosApiController extends Controller
             return;
         }
 
-        $period = \Illuminate\Support\Carbon::parse($penghuni->tanggal_masuk)->startOfMonth();
+        $period = Carbon::parse($penghuni->tanggal_masuk)->startOfMonth();
         $nominal = (int) $penghuni->harga_bulanan;
         $paid = match ($paymentStatus) {
             'lunas' => $nominal,
@@ -1612,6 +1774,27 @@ class BalikosApiController extends Controller
                 'created_at' => now(),
             ]
         );
+
+        $bill = DB::table('tagihans')
+            ->where('penghuni_id', $penghuni->id)
+            ->where('bulan', (int) $period->month)
+            ->where('tahun', (int) $period->year)
+            ->first();
+        if ($bill && $paid > 0) {
+            DB::table('tagihan_pembayarans')->updateOrInsert(
+                ['tagihan_id' => $bill->id, 'sumber' => 'pembayaran_awal'],
+                [
+                    'kos_id' => $bill->kos_id,
+                    'penghuni_id' => $bill->penghuni_id,
+                    'nominal' => $paid,
+                    'tanggal_bayar' => $penghuni->tanggal_masuk,
+                    'metode_pembayaran' => $paymentStatus === 'dp' ? 'dp' : 'tunai',
+                    'catatan' => $paymentStatus === 'dp' ? 'DP masuk kamar.' : 'Pembayaran awal masuk kamar.',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+        }
     }
 
     private function createBills($penghunis, int $bulan, int $tahun, ?string $tanggalJatuhTempo): int
@@ -1672,11 +1855,11 @@ class BalikosApiController extends Controller
     private function nextDueInfo($penghuni): array
     {
         $current = now()->startOfMonth();
-        $due = \Illuminate\Support\Carbon::parse($this->dueDateForPenghuni($penghuni, (int) $current->month, (int) $current->year))->startOfDay();
+        $due = Carbon::parse($this->dueDateForPenghuni($penghuni, (int) $current->month, (int) $current->year))->startOfDay();
 
         if ($due->lt(now()->startOfDay())) {
             $next = $current->copy()->addMonth();
-            $due = \Illuminate\Support\Carbon::parse($this->dueDateForPenghuni($penghuni, (int) $next->month, (int) $next->year))->startOfDay();
+            $due = Carbon::parse($this->dueDateForPenghuni($penghuni, (int) $next->month, (int) $next->year))->startOfDay();
         }
 
         return [

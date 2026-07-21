@@ -41,8 +41,8 @@
     </tr>
     <tr>
         <td><span class="label">Pengeluaran</span><span class="value loss">{{ $money($summary['pengeluaran']) }}</span></td>
+        <td><span class="label">Kerugian tunggakan</span><span class="value loss">{{ $money($summary['kerugian_tunggakan']) }}</span></td>
         <td><span class="label">Laba/Rugi</span><span class="value {{ $summary['laba_rugi'] >= 0 ? 'profit' : 'loss' }}">{{ $money($summary['laba_rugi']) }}</span></td>
-        <td><span class="label">Margin</span><span class="value">{{ $summary['margin_persen'] }}%</span></td>
     </tr>
 </table>
 
@@ -67,7 +67,31 @@
             <td class="right">{{ $money($bill->nominal) }}</td>
         </tr>
     @empty
-        <tr><td colspan="5" class="center muted">Belum ada pendapatan sewa lunas pada periode ini.</td></tr>
+        <tr><td colspan="5" class="center muted">Belum ada pembayaran sewa pada periode ini.</td></tr>
+    @endforelse
+    </tbody>
+</table>
+
+<h2>Kerugian Tunggakan Penghuni Keluar</h2>
+<table>
+    <thead>
+    <tr>
+        <th>Kamar</th>
+        <th>Penghuni</th>
+        <th>Tanggal Keluar</th>
+        <th class="right">Kerugian</th>
+    </tr>
+    </thead>
+    <tbody>
+    @forelse($lossBills as $bill)
+        <tr>
+            <td>{{ $bill->nomor_kamar ? 'Kamar '.$bill->nomor_kamar : '-' }}</td>
+            <td>{{ $bill->nama_lengkap ?? '-' }}</td>
+            <td>{{ $bill->tanggal_kerugian ?? '-' }}</td>
+            <td class="right">{{ $money($bill->nominal) }}</td>
+        </tr>
+    @empty
+        <tr><td colspan="4" class="center muted">Tidak ada kerugian tunggakan pada periode ini.</td></tr>
     @endforelse
     </tbody>
 </table>
@@ -97,7 +121,7 @@
 </table>
 
 <div class="footer">
-    Laporan ini dibuat otomatis oleh BALIKOS berdasarkan data tagihan lunas dan transaksi keuangan yang tercatat.
+    Laporan ini dibuat otomatis oleh BALIKOS berdasarkan pembayaran sewa yang diterima, transaksi keuangan, dan tunggakan penghuni yang keluar.
 </div>
 </body>
 </html>

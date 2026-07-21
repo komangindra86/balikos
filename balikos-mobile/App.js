@@ -91,6 +91,7 @@ const emptyPaymentForm = { jenis: 'qris', nama_bank: '', nomor_rekening: '', ata
 const emptyFinanceForm = { id: null, jenis: 'pemasukan', tanggal: today(), nominal: '', keterangan: '' };
 const emptyAnnouncementForm = { id: null, judul: '', isi: '', status: 'aktif' };
 const emptyWithdrawForm = { nominal: '', nama_bank: '', nomor_rekening: '', atas_nama: '' };
+const emptyInitialPaymentForm = { id: '', nominal: '', tanggal_bayar: today(), harga_kamar: 0 };
 
 export default function App() {
   return (
@@ -140,6 +141,7 @@ function BalikosApp() {
   const [financeForm, setFinanceForm] = useState(emptyFinanceForm);
   const [announcementForm, setAnnouncementForm] = useState(emptyAnnouncementForm);
   const [withdrawForm, setWithdrawForm] = useState(emptyWithdrawForm);
+  const [initialPaymentForm, setInitialPaymentForm] = useState(emptyInitialPaymentForm);
   const [modal, setModal] = useState(null);
   const [periodDraft, setPeriodDraft] = useState({ bulan: thisMonth(), tahun: thisYear() });
   const waitingVerificationRef = useRef(null);
@@ -714,9 +716,13 @@ function BalikosApp() {
   }
 
   async function checkoutOccupant(occupant) {
+    const outstanding = Number(occupant.tagihan_aktif_nominal || 0);
+    const lossNotice = outstanding > 0
+      ? `\n\nSisa tunggakan ${money(outstanding)} akan otomatis tercatat sebagai kerugian pada laporan bulan ini.`
+      : '';
     Alert.alert(
       'Keluarkan penghuni?',
-      `Penghuni ${occupant.nama_lengkap} akan ditandai keluar hari ini. Jika salah, data penghuni harus diaktifkan/diinput ulang.`,
+      `Penghuni ${occupant.nama_lengkap} akan ditandai keluar hari ini. Jika salah, data penghuni harus diaktifkan/diinput ulang.${lossNotice}`,
       [
         { text: 'Batal', style: 'cancel' },
         {
@@ -730,7 +736,7 @@ function BalikosApp() {
               await loadOccupants();
               await loadRooms();
               await loadDashboard();
-              Alert.alert('Penghuni dikeluarkan', 'Status penghuni menjadi keluar dan kamar kembali kosong.');
+              Alert.alert('Penghuni dikeluarkan', outstanding > 0 ? 'Kamar kembali kosong dan tunggakan sudah masuk ke kerugian laporan.' : 'Status penghuni menjadi keluar dan kamar kembali kosong.');
             }, 'Gagal mengeluarkan penghuni');
           },
         },
@@ -869,6 +875,38 @@ function BalikosApp() {
       await loadBills();
       await loadOccupants();
     }, 'Gagal memperbarui tagihan');
+  }
+
+  function openInitialPaymentCorrection(bill) {
+    setInitialPaymentForm({
+      id: String(bill.id),
+      nominal: formatNumberInput(bill.nominal_terbayar || 0),
+      tanggal_bayar: bill.tanggal_bayar || today(),
+      harga_kamar: Number(bill.nominal || 0),
+    });
+    setModal('initialPayment');
+  }
+
+  function saveInitialPaymentCorrection() {
+    const nominal = Number(cleanNumber(initialPaymentForm.nominal));
+    if (!initialPaymentForm.tanggal_bayar) return Alert.alert('Tanggal wajib diisi', 'Pilih tanggal DP diterima.');
+    if (nominal < 0 || nominal > Number(initialPaymentForm.harga_kamar)) return Alert.alert('Nominal DP tidak sesuai', 'DP tidak boleh melebihi harga sewa kamar.');
+
+    Alert.alert('Simpan koreksi DP?', `DP akan diperbarui menjadi ${money(nominal)}.`, [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: 'Simpan',
+        onPress: () => submit(async () => {
+          await api(`/tagihan/${initialPaymentForm.id}/pembayaran-awal`, {
+            method: 'PUT',
+            body: { nominal, tanggal_bayar: initialPaymentForm.tanggal_bayar },
+          });
+          setModal(null);
+          setInitialPaymentForm(emptyInitialPaymentForm);
+          await Promise.all([loadBills(), loadOccupants(), loadMore()]);
+        }, 'Gagal mengoreksi DP'),
+      },
+    ]);
   }
 
   async function savePaymentMethod() {
@@ -1168,7 +1206,7 @@ function BalikosApp() {
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} bottomInset={safeInsets.bottom} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
-      <OccupantDetailModal occupant={occupantDetail} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(occupantDetail?.id))} rooms={rooms} apiBase={apiBase} onClose={() => setOccupantDetail(null)} onEdit={openOccupantEditModal} onCheckout={checkoutOccupant} onSharePortal={shareOccupantPortal} onGenerateBill={generateBillForOccupant} onCashPay={openCashPaymentForOccupant} updateBillStatus={updateBillStatus} openImagePreview={setImagePreview} />
+      <OccupantDetailModal occupant={occupantDetail} bills={bills.filter((bill) => Number(bill.penghuni_id) === Number(occupantDetail?.id))} rooms={rooms} apiBase={apiBase} onClose={() => setOccupantDetail(null)} onEdit={openOccupantEditModal} onCheckout={checkoutOccupant} onSharePortal={shareOccupantPortal} onGenerateBill={generateBillForOccupant} onCashPay={openCashPaymentForOccupant} updateBillStatus={updateBillStatus} openImagePreview={setImagePreview} onCorrectInitialPayment={openInitialPaymentCorrection} />
       <ImagePreviewModal uri={imagePreview} onClose={() => setImagePreview(null)} />
       <KosFormModal visible={modal === 'kos'} form={kosForm} setForm={setKosForm} onSave={saveKos} onDelete={deleteKos} onClose={() => { setModal(null); setKosForm(emptyKosForm); }} loading={loading} />
       <RoomFormModal visible={modal === 'room'} form={roomForm} setForm={setRoomForm} apiBase={apiBase} onPick={pickRoomImage} onSave={saveRoom} onClose={() => { setModal(null); setRoomForm(emptyRoomForm); }} loading={loading} />
@@ -1180,6 +1218,7 @@ function BalikosApp() {
       <PaymentFormModal visible={modal === 'payment'} form={paymentForm} setForm={setPaymentForm} onSave={savePaymentMethod} onClose={() => setModal(null)} loading={loading} />
       <PaymentInfoModal visible={modal === 'paymentInfo'} onClose={() => setModal(null)} />
       <WithdrawModal visible={modal === 'withdraw'} form={withdrawForm} setForm={setWithdrawForm} wallet={paymentWallet} onSave={saveWithdraw} onClose={() => { setModal(null); setWithdrawForm(emptyWithdrawForm); }} loading={loading} />
+      <InitialPaymentCorrectionModal visible={modal === 'initialPayment'} form={initialPaymentForm} setForm={setInitialPaymentForm} onSave={saveInitialPaymentCorrection} onClose={() => { setModal(null); setInitialPaymentForm(emptyInitialPaymentForm); }} loading={loading} />
       <FinanceFormModal visible={modal === 'finance'} form={financeForm} setForm={setFinanceForm} onSave={saveFinance} onClose={() => { setModal(null); setFinanceForm(emptyFinanceForm); }} loading={loading} />
       <AnnouncementFormModal visible={modal === 'announcement'} form={announcementForm} setForm={setAnnouncementForm} onSave={saveAnnouncement} onClose={() => { setModal(null); setAnnouncementForm(emptyAnnouncementForm); }} loading={loading} />
     </View>
@@ -1604,11 +1643,12 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
   );
 }
 
-function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit, onCheckout, onSharePortal, onGenerateBill, onCashPay, updateBillStatus, openImagePreview }) {
+function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit, onCheckout, onSharePortal, onGenerateBill, onCashPay, updateBillStatus, openImagePreview, onCorrectInitialPayment }) {
   if (!occupant) return null;
   const sortedBills = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status) || Number(b.tahun) - Number(a.tahun) || Number(b.bulan) - Number(a.bulan));
   const hasActiveBill = sortedBills.some((bill) => bill.status !== 'lunas');
   const isExited = occupant.status === 'keluar';
+  const recordedLoss = sortedBills.reduce((total, bill) => total + Number(bill.kerugian_tunggakan || 0), 0);
   const canCollectPayment = !isExited || hasActiveBill;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -1628,7 +1668,7 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
           ) : null}
           {isExited && hasActiveBill ? (
             <View style={styles.notice}>
-              <Text style={styles.noticeText}>Penghuni ini sudah keluar, tapi masih ada tagihan yang belum selesai. Pemilik tetap bisa share portal atau mencatat pembayaran tunai.</Text>
+              <Text style={styles.noticeText}>{recordedLoss > 0 ? `Penghuni ini sudah keluar. Sisa tunggakan ${money(recordedLoss)} sudah masuk sebagai kerugian laporan. Jika kemudian dibayar, pembayaran tetap tercatat sebagai pemasukan sewa.` : 'Penghuni ini sudah keluar, tapi masih ada tagihan yang belum selesai. Pemilik tetap bisa share portal atau mencatat pembayaran tunai.'}</Text>
             </View>
           ) : null}
           {canCollectPayment ? (
@@ -1644,7 +1684,7 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
           {occupant.status === 'aktif' && occupant.akan_jatuh_tempo ? (
             <SecondaryButton title="Buat Tagihan Jatuh Tempo" onPress={() => onGenerateBill(occupant)} style={{ marginTop: spacing.sm }} />
           ) : null}
-          {sortedBills.map((bill) => <OccupantBillCard key={bill.id} bill={bill} apiBase={apiBase} updateBillStatus={updateBillStatus} openImagePreview={openImagePreview} />)}
+          {sortedBills.map((bill) => <OccupantBillCard key={bill.id} bill={bill} apiBase={apiBase} updateBillStatus={updateBillStatus} openImagePreview={openImagePreview} onCorrectInitialPayment={onCorrectInitialPayment} />)}
           {sortedBills.length === 0 ? <Empty text="Belum ada tagihan untuk penghuni ini." /> : null}
           <Text style={styles.sectionTitle}>Kontak</Text>
           <SimpleCard title="Data Kontak" lines={[`WA ${occupant.no_wa || '-'}`, `KTP ${occupant.no_ktp || '-'}`, `Kontak darurat ${occupant.kontak_darurat || '-'}`]} />
@@ -1900,6 +1940,21 @@ function WithdrawModal({ visible, form, setForm, wallet, onSave, onClose, loadin
       <FormField label="Nomor rekening" value={form.nomor_rekening} onChangeText={(v) => setForm({ ...form, nomor_rekening: v })} keyboardType="number-pad" helperText="Periksa ulang nomor rekening sebelum mengajukan." />
       <FormField label="Atas nama" value={form.atas_nama} onChangeText={(v) => setForm({ ...form, atas_nama: v })} helperText="Isi persis seperti nama di rekening bank." />
       <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle="Ajukan Tarik Saldo" />
+    </BaseModal>
+  );
+}
+
+function InitialPaymentCorrectionModal({ visible, form, setForm, onSave, onClose, loading }) {
+  return (
+    <BaseModal visible={visible} title="Koreksi DP" onClose={onClose}>
+      <Text style={styles.muted}>Gunakan jika nominal DP saat penghuni masuk salah. Perubahan ini akan langsung menyesuaikan sisa tagihan dan laporan pemasukan sewa.</Text>
+      <View style={styles.lockedInfo}>
+        <Text style={styles.lockedTitle}>Harga sewa kamar</Text>
+        <Text style={styles.money}>{money(form.harga_kamar)}</Text>
+      </View>
+      <FormField label="Nominal DP diterima" value={form.nominal} onChangeText={(v) => setForm({ ...form, nominal: formatNumberInput(v) })} keyboardType="number-pad" helperText="Isi 0 jika DP sebelumnya ternyata belum diterima." />
+      <CompactDatePicker label="Tanggal DP diterima" value={form.tanggal_bayar} onChange={(tanggal_bayar) => setForm({ ...form, tanggal_bayar })} />
+      <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle="Simpan Koreksi DP" />
     </BaseModal>
   );
 }
@@ -2480,6 +2535,7 @@ function OccupantCard({ item, bills, rooms, onPress }) {
   const verifyBills = Number(item.tagihan_verifikasi_count || 0);
   const isExited = item.status === 'keluar';
   const hasDebtAfterExit = isExited && (openBills > 0 || verifyBills > 0);
+  const recordedLoss = (bills || []).reduce((total, bill) => total + Number(bill.kerugian_tunggakan || 0), 0);
   const latestBill = [...(bills || [])].sort((a, b) => billSortPriority(a.status) - billSortPriority(b.status))[0];
   const paymentLabel = verifyBills > 0
     ? `${verifyBills} pembayaran perlu dicek`
@@ -2498,7 +2554,7 @@ function OccupantCard({ item, bills, rooms, onPress }) {
       </View>
       {hasDebtAfterExit ? (
         <View style={styles.noticeMini}>
-          <Text style={styles.noticeMiniText}>Sudah keluar, tapi masih ada pembayaran yang harus diselesaikan.</Text>
+          <Text style={styles.noticeMiniText}>{recordedLoss > 0 ? `Sudah keluar. Tunggakan ${money(recordedLoss)} sudah tercatat sebagai kerugian laporan.` : 'Sudah keluar, tapi masih ada pembayaran yang harus diselesaikan.'}</Text>
         </View>
       ) : null}
       <Text style={styles.muted}>Kamar terakhir {roomName(rooms, item.kamar_id)} - WA {item.no_wa || '-'}</Text>
@@ -2556,7 +2612,7 @@ function BillCard({ bill, rooms, apiBase, updateBillStatus, openImagePreview }) 
   );
 }
 
-function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview }) {
+function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview, onCorrectInitialPayment }) {
   const hasProof = Boolean(bill.bukti_pembayaran || bill.bukti_pembayaran_url);
   const proofUri = proofImageUrl(bill, apiBase);
   const canReview = bill.status === 'menunggu_verifikasi';
@@ -2585,6 +2641,7 @@ function OccupantBillCard({ bill, apiBase, updateBillStatus, openImagePreview })
           <PrimaryButton title="Verifikasi" onPress={() => updateBillStatus(bill.id, 'verifikasi')} style={styles.flexButton} />
         </View>
       ) : null}
+      {bill.bisa_koreksi_dp ? <SecondaryButton title="Koreksi DP" onPress={() => onCorrectInitialPayment(bill)} style={{ marginTop: spacing.sm }} /> : null}
       {canCashPay ? <PrimaryButton title="Bayar Tunai" onPress={() => updateBillStatus(bill.id, 'lunas')} style={{ marginTop: spacing.sm }} /> : null}
     </View>
   );
@@ -2619,12 +2676,13 @@ function ProfitSummary({ summary }) {
     <View style={[styles.profitCard, !isProfit && styles.lossCard]}>
       <Text style={styles.profitLabel}>Laba/Rugi {monthName(summary.bulan)} {summary.tahun}</Text>
       <Text style={[styles.profitValue, !isProfit && styles.lossValue]}>{money(summary.laba_rugi)}</Text>
-      <Text style={styles.muted}>{isProfit ? 'Kos sedang untung.' : 'Kos sedang rugi. Cek pengeluaran terbesar bulan ini.'}</Text>
+      <Text style={styles.muted}>{isProfit ? 'Kos sedang untung.' : 'Kos sedang rugi. Cek pengeluaran dan tunggakan penghuni keluar.'}</Text>
       <View style={styles.summaryGrid}>
-        <SummaryItem label="Sewa lunas" value={summary.pendapatan_sewa} />
+        <SummaryItem label="Sewa diterima" value={summary.pendapatan_sewa} />
         <SummaryItem label="Pemasukan lain" value={summary.pemasukan_lain} />
         <SummaryItem label="Total masuk" value={summary.total_pemasukan} />
         <SummaryItem label="Pengeluaran" value={summary.pengeluaran} danger />
+        <SummaryItem label="Kerugian tunggakan" value={summary.kerugian_tunggakan} danger />
         <SummaryItem label="Margin" value={`${summary.margin_persen}%`} />
       </View>
     </View>
