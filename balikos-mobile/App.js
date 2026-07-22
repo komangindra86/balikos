@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -1144,16 +1144,19 @@ function BalikosApp() {
   }
 
   async function shareOccupantPortal(occupant) {
+    const phone = whatsappNumber(occupant.no_wa);
+    if (!phone) {
+      Alert.alert('Nomor WhatsApp belum ada', 'Edit data penghuni dan isi nomor WhatsApp terlebih dahulu.');
+      return;
+    }
+
     await submit(async () => {
       const response = await api(`/penghuni/${occupant.id}/portal-link`);
       const token = response.data?.portal_token;
       const link = token ? portalUrl(token, apiBase) : response.data?.portal_link;
-      await Share.share({
-        title: 'Portal Penghuni BALIKOS',
-        message: `Halo ${occupant.nama_lengkap}, ini link portal pembayaran kos kamu:\n${link}`,
-        url: link,
-      });
-    }, 'Gagal membagikan portal penghuni');
+      const message = `Halo ${occupant.nama_lengkap}, ini link portal pembayaran kos kamu:\n${link}`;
+      await Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
+    }, 'Gagal membuka WhatsApp');
   }
 
   async function logout() {
@@ -1673,7 +1676,7 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
           ) : null}
           {canCollectPayment ? (
             <View style={styles.actionRow}>
-              <PrimaryButton title="Share Portal" onPress={() => onSharePortal(occupant)} style={styles.flexButton} />
+              <PrimaryButton title="Kirim ke WA" onPress={() => onSharePortal(occupant)} style={styles.flexButton} />
               <SecondaryButton title="Bayar Tunai" onPress={() => onCashPay(occupant)} style={styles.flexButton} />
             </View>
           ) : (
@@ -1905,12 +1908,12 @@ function PaymentFormModal({ visible, form, setForm, onSave, onClose, loading }) 
       <Text style={styles.label}>Alur pembayaran</Text>
       <Segment items={['qris', 'bank']} labels={{ qris: 'QRIS Otomatis (Rekomendasi)', bank: 'Transfer Bank' }} value={form.jenis} onChange={(jenis) => setForm({ ...form, jenis, nama_bank: jenis === 'qris' ? '' : form.nama_bank, nomor_rekening: jenis === 'qris' ? '' : form.nomor_rekening, atas_nama: jenis === 'qris' ? '' : form.atas_nama })} />
       <View style={styles.notice}>
-        <Text style={styles.noticeText}>{isQris ? 'Penghuni membayar dengan scan QRIS. Total bayar ditambah biaya layanan 1%, lalu nominal sewa masuk ke saldo kos.' : 'Penghuni melihat rekening ini di portal, mengunggah bukti transfer, lalu pemilik kos melakukan verifikasi manual.'}</Text>
+        <Text style={styles.noticeText}>{isQris ? 'Penghuni membayar dengan scan QRIS. Total bayar ditambah biaya layanan 0,9%, lalu nominal sewa masuk ke saldo kos.' : 'Penghuni melihat rekening ini di portal, mengunggah bukti transfer, lalu pemilik kos melakukan verifikasi manual.'}</Text>
       </View>
       {isQris ? (
         <>
           <FormField label="Kode akun pembayaran" value={form.gateway_account_id} onChangeText={(v) => setForm({ ...form, gateway_account_id: v })} placeholder="Opsional" />
-          <FormField label="Catatan instruksi" value={form.instruksi_pembayaran} onChangeText={(v) => setForm({ ...form, instruksi_pembayaran: v })} multiline placeholder="Scan QRIS. Total bayar termasuk biaya layanan 1%." />
+          <FormField label="Catatan instruksi" value={form.instruksi_pembayaran} onChangeText={(v) => setForm({ ...form, instruksi_pembayaran: v })} multiline placeholder="Scan QRIS. Total bayar termasuk biaya layanan 0,9%." />
         </>
       ) : (
         <>
@@ -2590,7 +2593,7 @@ function BillCard({ bill, rooms, apiBase, updateBillStatus, openImagePreview }) 
       <Text style={styles.muted}>Jatuh tempo {bill.tanggal_jatuh_tempo || '-'}</Text>
       <Text style={styles.money}>{money(bill.nominal)}</Text>
       {paid > 0 && bill.status !== 'lunas' ? <Text style={styles.muted}>Sudah dibayar {money(paid)}. Sisa {money(remaining)}.</Text> : null}
-      {Number(bill.biaya_platform || 0) > 0 ? <Text style={styles.muted}>Biaya QRIS 1% {money(bill.biaya_platform)} - Total {money(bill.total_dibayar)}</Text> : null}
+      {Number(bill.biaya_platform || 0) > 0 ? <Text style={styles.muted}>Biaya QRIS {money(bill.biaya_platform)} - Total {money(bill.total_dibayar)}</Text> : null}
       {hasProof ? (
         <>
           <Text style={styles.label}>Bukti bayar</Text>
@@ -2744,6 +2747,14 @@ function money(value) {
 
 function cleanNumber(value) {
   return String(value ?? '').replace(/[^0-9]/g, '');
+}
+
+function whatsappNumber(value) {
+  const digits = cleanNumber(value);
+  if (!digits) return '';
+  if (digits.startsWith('0')) return `62${digits.slice(1)}`;
+  if (digits.startsWith('62')) return digits;
+  return `62${digits}`;
 }
 
 function formatNumberInput(value) {

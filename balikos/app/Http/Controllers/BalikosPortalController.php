@@ -178,8 +178,12 @@ class BalikosPortalController extends Controller
             $tagihan = $tagihan->map(function ($bill) use ($token) {
                 $bill->nominal_terbayar = (int) ($bill->nominal_terbayar ?? 0);
                 $bill->sisa_tagihan = max(0, (int) $bill->nominal - (int) $bill->nominal_terbayar);
-                $bill->biaya_platform = (int) ($bill->biaya_platform ?: ceil(((int) $bill->sisa_tagihan) * 0.01));
-                $bill->total_dibayar = (int) ($bill->total_dibayar ?: ((int) $bill->sisa_tagihan + (int) $bill->biaya_platform));
+                $hasPendingInvoice = ! empty($bill->gateway_invoice_url)
+                    && in_array($bill->gateway_status, [null, 'PENDING'], true);
+                if (! $hasPendingInvoice) {
+                    $bill->biaya_platform = (int) ceil(((int) $bill->sisa_tagihan) * (float) config('services.xendit.qris_fee_rate', 0.009));
+                    $bill->total_dibayar = (int) $bill->sisa_tagihan + (int) $bill->biaya_platform;
+                }
                 $bill->qris_payment_url = route('balikos.portal.pay-qris', [$token, $bill->id]);
 
                 return $bill;

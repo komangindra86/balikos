@@ -242,8 +242,8 @@ class XenditInvoiceService
     private function prepareBillForXendit(object $bill): object
     {
         $remaining = max(0, (int) $bill->nominal - (int) ($bill->nominal_terbayar ?? 0));
-        $fee = (int) ($bill->biaya_platform ?: $this->qrisFee($remaining));
-        $total = (int) ($bill->total_dibayar ?: ($remaining + $fee));
+        $fee = $this->qrisFee($remaining);
+        $total = $remaining + $fee;
 
         if ((int) $bill->biaya_platform !== $fee || (int) ($bill->total_dibayar ?? 0) !== $total || empty($bill->gateway_reference)) {
             DB::table('tagihans')->where('id', $bill->id)->update([
@@ -305,7 +305,7 @@ class XenditInvoiceService
 
     private function qrisFee(int $nominal): int
     {
-        return (int) ceil($nominal * 0.01);
+        return (int) ceil($nominal * (float) config('services.xendit.qris_fee_rate', 0.009));
     }
 
     private function normalizePhone(?string $phone): ?string

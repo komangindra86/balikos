@@ -44,6 +44,7 @@ return [
         'secret_key' => env('XENDIT_SECRET_KEY'),
         'mode' => env('XENDIT_MODE', 'production'),
         'webhook_token' => env('XENDIT_WEBHOOK_TOKEN'),
+        'qris_fee_rate' => (float) env('XENDIT_QRIS_FEE_RATE', 0.009),
     ],
 
 ];

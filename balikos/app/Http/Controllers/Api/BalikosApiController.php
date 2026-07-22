@@ -1441,7 +1441,11 @@ class BalikosApiController extends Controller
             $row->nominal_terbayar = (int) ($row->nominal_terbayar ?? ($row->status === 'lunas' ? $row->nominal : 0));
             $row->sisa_tagihan = max(0, (int) $row->nominal - (int) $row->nominal_terbayar);
             $fee = (int) ($row->biaya_platform ?? 0);
-            if ($fee === 0 && $this->activeQrisMethod((int) $row->kos_id) && in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak', 'menunggu_verifikasi'], true)) {
+            $isOpenQrisBill = $this->activeQrisMethod((int) $row->kos_id)
+                && in_array($row->status, ['belum_lunas', 'terlambat', 'ditolak', 'menunggu_verifikasi'], true);
+            $hasPendingInvoice = ! empty($row->gateway_invoice_url)
+                && in_array($row->gateway_status, [null, 'PENDING'], true);
+            if ($isOpenQrisBill && ! $hasPendingInvoice) {
                 $fee = $this->qrisFee((int) $row->sisa_tagihan);
             }
             $row->biaya_platform = $fee;
@@ -1606,7 +1610,7 @@ class BalikosApiController extends Controller
 
     private function qrisFee(int $nominal): int
     {
-        return (int) ceil($nominal * 0.01);
+        return (int) ceil($nominal * (float) config('services.xendit.qris_fee_rate', 0.009));
     }
 
     private function activeQrisMethod(int $kosId): ?object

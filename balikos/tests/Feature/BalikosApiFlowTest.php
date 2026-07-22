@@ -547,6 +547,8 @@ class BalikosApiFlowTest extends TestCase
         ])->assertOk();
 
         $tagihan = DB::table('tagihans')->where('penghuni_id', $penghuni['id'])->first();
+        $this->assertSame(9000, (int) $tagihan->biaya_platform);
+        $this->assertSame(1009000, (int) $tagihan->total_dibayar);
         $environment = substr(hash('sha256', config('app.url').'|'.config('app.env')), 0, 10);
         $expectedReference = 'balikos-'.$environment.'-tagihan-'.$tagihan->id;
 
@@ -556,7 +558,7 @@ class BalikosApiFlowTest extends TestCase
                 return Http::response([[
                     'id' => 'inv-test-'.$tagihan->id,
                     'external_id' => $expectedReference,
-                    'amount' => 1010000,
+                    'amount' => 1009000,
                     'status' => 'PENDING',
                     'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
                 ]], 200);
@@ -573,7 +575,7 @@ class BalikosApiFlowTest extends TestCase
                 return Http::response([
                     'id' => 'inv-test-'.$tagihan->id,
                     'external_id' => $expectedReference,
-                    'amount' => 1010000,
+                    'amount' => 1009000,
                     'status' => 'PENDING',
                     'invoice_url' => 'https://checkout.xendit.co/web/inv-test-'.$tagihan->id,
                 ], 200);
@@ -613,8 +615,8 @@ class BalikosApiFlowTest extends TestCase
             'id' => 'inv-test-'.$tagihan->id,
             'external_id' => $expectedReference,
             'status' => 'PAID',
-            'paid_amount' => 1010000,
-            'amount' => 1010000,
+            'paid_amount' => 1009000,
+            'amount' => 1009000,
             'payment_id' => 'qrpy-test-'.$tagihan->id,
             'payment_method' => 'QR_CODE',
             'payment_channel' => 'QRIS',
