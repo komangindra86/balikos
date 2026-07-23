@@ -4,12 +4,11 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BalikosController;
 use App\Http\Controllers\BalikosPortalController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PublicKosController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
-Route::get('/', function () {
-    return redirect()->route('dashboard');
-});
+Route::get('/', [PublicKosController::class, 'index'])->name('home');
 
 Route::get('/health', function () {
     return response()->json([
@@ -31,8 +30,9 @@ Route::get('/balikos/media/{path}', function (string $path) {
         'Cache-Control' => 'public, max-age=86400',
     ]);
 })->where('path', '.*')->name('balikos.media');
-Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
-Route::post('/login', [AuthController::class, 'login'])->name('login.store');
+Route::redirect('/login', '/admin/login');
+Route::get('/admin/login', [AuthController::class, 'showLogin'])->name('login');
+Route::post('/admin/login', [AuthController::class, 'login'])->name('login.store');
 Route::get('/balikos/portal/{token}', [BalikosPortalController::class, 'show'])->name('balikos.portal.show');
 Route::get('/balikos/portal/{token}/manifest.webmanifest', [BalikosPortalController::class, 'manifest'])->name('balikos.portal.manifest');
 Route::get('/balikos/portal/{token}/status', [BalikosPortalController::class, 'status'])->name('balikos.portal.status');
