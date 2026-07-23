@@ -85,15 +85,87 @@
                     <article class="group overflow-hidden rounded-2xl border border-[#dfe5e0] bg-white shadow-[0_4px_20px_rgba(34,55,43,.05)] transition hover:-translate-y-1 hover:shadow-[0_14px_35px_rgba(34,55,43,.12)]">
                         <div class="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-[#dfeae1] to-[#f0dcd0]">
                             @if($item->foto)<img src="{{ route('balikos.media', ['path'=>$item->foto]) }}" alt="Foto {{ $item->nama_kos }}" class="size-full object-cover transition duration-500 group-hover:scale-105">@else<div class="grid size-full place-items-center text-center text-[#6b8174]"><div><div class="text-5xl">⌂</div><span class="mt-2 block text-xs font-bold">Foto segera tersedia</span></div></div>@endif
-                            <span class="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-extrabold text-[#166044] shadow-sm">● {{ $item->kamar_tersedia }} kamar tersedia</span>
+                            @if($item->kamar_tersedia > 0)
+                                <span class="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-extrabold text-[#166044] shadow-sm">● {{ $item->kamar_tersedia }} kamar tersedia</span>
+                            @else
+                                <span class="absolute left-3 top-3 rounded-full bg-[#fff3ec]/95 px-3 py-1.5 text-[11px] font-extrabold text-[#b94f2c] shadow-sm">● Sedang penuh</span>
+                            @endif
                         </div>
                         <div class="p-5"><div class="flex items-start justify-between gap-3"><div><h3 class="line-clamp-1 text-lg font-extrabold">{{ $item->nama_kos }}</h3><p class="mt-1 line-clamp-1 text-xs text-[#718078]">{{ $item->desa ? $item->desa.', ' : '' }}{{ $item->kecamatan }}</p></div><span class="shrink-0 rounded-lg bg-[#edf5ef] px-2 py-1 text-[10px] font-bold text-[#166044]">Terverifikasi</span></div>
                             <div class="mt-4 flex flex-wrap gap-1.5">@foreach(array_slice(array_keys($features),0,4) as $feature)<span class="rounded-md bg-[#f1f3f0] px-2 py-1 text-[10px] font-semibold text-[#59675f]">{{ $feature }}</span>@endforeach @if(count($features)>4)<span class="rounded-md bg-[#f1f3f0] px-2 py-1 text-[10px] font-semibold">+{{ count($features)-4 }}</span>@endif</div>
                             <div class="mt-5 border-t border-[#edf0ed] pt-4"><p class="text-[11px] text-[#7b877f]">Mulai dari</p><p class="text-lg font-extrabold text-[#166044]">Rp {{ number_format($item->harga_mulai, 0, ',', '.') }}<span class="text-xs font-medium text-[#7b877f]"> /bulan</span></p></div>
-                            <button type="button" class="detail-btn mt-4 w-full rounded-xl border border-[#ccd6d0] py-2.5 text-sm font-extrabold transition hover:border-[#166044] hover:bg-[#edf5ef] hover:text-[#166044]" data-id="detail-{{ $item->id }}">Lihat detail</button>
+                            <button type="button" class="detail-btn mt-4 w-full rounded-xl border border-[#ccd6d0] py-2.5 text-sm font-extrabold transition hover:border-[#166044] hover:bg-[#edf5ef] hover:text-[#166044]" data-id="detail-{{ $item->id }}">{{ $item->kamar_tersedia > 0 ? 'Lihat kamar tersedia' : 'Lihat informasi kos' }}</button>
                         </div>
-                        <dialog id="detail-{{ $item->id }}" class="m-auto w-[calc(100%-2rem)] max-w-2xl rounded-3xl bg-white p-0 shadow-2xl backdrop:bg-[#102219]/60 backdrop:backdrop-blur-sm">
-                            <div class="relative"><button class="dialog-close absolute right-4 top-4 z-10 grid size-10 place-items-center rounded-full bg-white text-xl shadow-md" aria-label="Tutup">×</button><div class="aspect-[16/7] bg-[#e4ebe4]">@if($item->foto)<img src="{{ route('balikos.media', ['path'=>$item->foto]) }}" alt="{{ $item->nama_kos }}" class="size-full object-cover">@endif</div><div class="p-6 sm:p-8"><div class="flex flex-wrap items-start justify-between gap-4"><div><span class="text-xs font-bold text-[#166044]">✓ Pemilik terdaftar</span><h3 class="mt-1 text-2xl font-extrabold">{{ $item->nama_kos }}</h3><p class="mt-2 text-sm leading-6 text-[#647269]">{{ $item->alamat }}</p></div><div><p class="text-xs text-[#79857e]">Mulai</p><strong class="text-xl text-[#166044]">Rp {{ number_format($item->harga_mulai,0,',','.') }}</strong><span class="text-xs">/bulan</span></div></div><div class="mt-6"><h4 class="text-sm font-extrabold">Fasilitas tersedia</h4><div class="mt-3 flex flex-wrap gap-2">@foreach(array_keys($features) as $feature)<span class="rounded-lg bg-[#edf5ef] px-3 py-2 text-xs font-semibold">✓ {{ $feature }}</span>@endforeach</div></div>@if($item->aturan_kos)<div class="mt-6 rounded-xl bg-[#f7f8f4] p-4"><h4 class="text-sm font-extrabold">Aturan kos</h4><p class="mt-2 whitespace-pre-line text-sm leading-6 text-[#647269]">{{ $item->aturan_kos }}</p></div>@endif<div class="mt-7 grid gap-3 sm:grid-cols-2"><a target="_blank" rel="noopener" href="{{ $maps }}" class="rounded-xl border border-[#cad4ce] py-3 text-center text-sm font-bold">Lihat lokasi</a>@if($wa)<a target="_blank" rel="noopener" href="https://wa.me/{{ $wa }}?text={{ urlencode('Halo, saya melihat '.$item->nama_kos.' di BALIKOS. Apakah kamar masih tersedia?') }}" class="rounded-xl bg-[#166044] py-3 text-center text-sm font-bold text-white">Hubungi pemilik via WhatsApp</a>@else<span class="rounded-xl bg-[#e9eeea] py-3 text-center text-sm text-[#758078]">Kontak belum tersedia</span>@endif</div></div></div>
+                        <dialog id="detail-{{ $item->id }}" class="m-auto max-h-[92vh] w-[calc(100%-2rem)] max-w-4xl overflow-y-auto rounded-3xl bg-white p-0 shadow-2xl backdrop:bg-[#102219]/60 backdrop:backdrop-blur-sm">
+                            <div class="relative">
+                                <button class="dialog-close sticky right-4 top-4 z-20 ml-auto mr-4 mt-4 grid size-10 place-items-center rounded-full bg-white text-xl shadow-md" aria-label="Tutup">×</button>
+                                <div class="-mt-14 aspect-[16/6] bg-[#e4ebe4]">@if($item->foto)<img src="{{ route('balikos.media', ['path'=>$item->foto]) }}" alt="{{ $item->nama_kos }}" class="size-full object-cover">@endif</div>
+                                <div class="p-6 sm:p-8">
+                                    <div class="flex flex-wrap items-start justify-between gap-4">
+                                        <div><span class="text-xs font-bold text-[#166044]">✓ Pemilik terdaftar</span><h3 class="mt-1 text-2xl font-extrabold">{{ $item->nama_kos }}</h3><p class="mt-2 max-w-xl text-sm leading-6 text-[#647269]">{{ $item->alamat }}</p></div>
+                                        <a target="_blank" rel="noopener" href="{{ $maps }}" class="rounded-xl border border-[#cad4ce] px-5 py-3 text-center text-sm font-bold">Lihat lokasi</a>
+                                    </div>
+
+                                    <div class="mt-8 flex items-end justify-between gap-4 border-t border-[#e8ece9] pt-7">
+                                        <div>
+                                            <p class="text-xs font-bold uppercase tracking-[.12em] text-[#e15f35]">{{ $item->kamar_tersedia > 0 ? 'Kamar yang bisa dipilih' : 'Referensi kamar' }}</p>
+                                            <h4 class="mt-1 text-xl font-extrabold">{{ $item->kamar_tersedia > 0 ? $item->kamar_tersedia.' kamar tersedia' : 'Saat ini semua kamar penuh' }}</h4>
+                                            @if($item->kamar_tersedia == 0)<p class="mt-2 text-xs leading-5 text-[#718078]">Kamu tetap bisa melihat foto dan kisaran harga, lalu menghubungi pemilik untuk menanyakan ketersediaan berikutnya.</p>@endif
+                                        </div>
+                                        <p class="hidden text-xs text-[#718078] sm:block">Foto dan harga sesuai kamar</p>
+                                    </div>
+
+                                    <div class="mt-5 grid gap-5 sm:grid-cols-2">
+                                        @foreach($item->rooms as $room)
+                                            @php
+                                                $roomFeatures = array_filter([
+                                                    'AC'=>$room->fasilitas_ac, 'Kamar mandi dalam'=>$room->fasilitas_km_dalam,
+                                                    'Wi-Fi'=>$room->fasilitas_wifi, 'Kasur'=>$room->fasilitas_kasur,
+                                                    'Lemari'=>$room->fasilitas_lemari, 'Meja'=>$room->fasilitas_meja,
+                                                    'Parkir'=>$room->fasilitas_parkir, 'Dapur dalam'=>$room->fasilitas_dapur_dalam,
+                                                ]);
+                                                $roomLabel = $room->tipe_kamar ?: 'Kamar '.$room->nomor_kamar;
+                                            @endphp
+                                            <section class="overflow-hidden rounded-2xl border border-[#dfe5e0] bg-white {{ $room->status !== 'kosong' ? 'opacity-90' : '' }}">
+                                                <div class="relative aspect-[4/3] bg-gradient-to-br from-[#dfeae1] to-[#f0dcd0]">
+                                                    @if($room->photos->isNotEmpty())
+                                                        <div class="room-gallery size-full">
+                                                            @foreach($room->photos as $photo)
+                                                                <img src="{{ route('balikos.media', ['path'=>$photo]) }}" alt="Foto {{ $roomLabel }} di {{ $item->nama_kos }}" class="{{ $loop->first ? '' : 'hidden' }} size-full object-cover" data-gallery-image>
+                                                            @endforeach
+                                                        </div>
+                                                        @if($room->photos->count() > 1)
+                                                            <button type="button" class="gallery-prev absolute left-3 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-lg shadow" aria-label="Foto sebelumnya">‹</button>
+                                                            <button type="button" class="gallery-next absolute right-3 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-lg shadow" aria-label="Foto berikutnya">›</button>
+                                                            <span class="gallery-count absolute bottom-3 right-3 rounded-full bg-[#17231d]/80 px-2.5 py-1 text-[10px] font-bold text-white">1/{{ $room->photos->count() }}</span>
+                                                        @endif
+                                                    @else
+                                                        <div class="grid size-full place-items-center text-center text-[#6b8174]"><div><div class="text-4xl">⌂</div><span class="mt-2 block text-xs font-bold">Foto belum tersedia</span></div></div>
+                                                    @endif
+                                                    @if($room->status === 'kosong')
+                                                        <span class="absolute left-3 top-3 rounded-full bg-[#e8f6ed] px-3 py-1 text-[10px] font-extrabold text-[#166044] shadow-sm">● Tersedia</span>
+                                                    @else
+                                                        <span class="absolute left-3 top-3 rounded-full bg-[#fff3ec] px-3 py-1 text-[10px] font-extrabold text-[#b94f2c] shadow-sm">● Sedang penuh</span>
+                                                    @endif
+                                                </div>
+                                                <div class="p-5">
+                                                    <div class="flex items-start justify-between gap-3">
+                                                        <div><h5 class="font-extrabold">{{ $roomLabel }}</h5><p class="mt-1 text-xs text-[#718078]">Nomor kamar {{ $room->nomor_kamar }}</p></div>
+                                                        <p class="text-right text-base font-extrabold text-[#166044]">Rp {{ number_format($room->harga_bulanan,0,',','.') }}<span class="block text-[10px] font-medium text-[#718078]">per bulan</span></p>
+                                                    </div>
+                                                    <div class="mt-4 flex flex-wrap gap-1.5">@forelse(array_keys($roomFeatures) as $feature)<span class="rounded-md bg-[#f1f3f0] px-2 py-1 text-[10px] font-semibold">{{ $feature }}</span>@empty<span class="text-xs text-[#87918b]">Detail fasilitas belum ditambahkan</span>@endforelse</div>
+                                                    @if($room->catatan)<p class="mt-4 border-t border-[#edf0ed] pt-3 text-xs leading-5 text-[#647269]">{{ $room->catatan }}</p>@endif
+                                                    @if($wa)
+                                                        <a target="_blank" rel="noopener" href="https://wa.me/{{ $wa }}?text={{ urlencode($room->status === 'kosong' ? 'Halo, saya melihat '.$roomLabel.' nomor '.$room->nomor_kamar.' di '.$item->nama_kos.' melalui BALIKOS. Apakah kamar ini masih tersedia?' : 'Halo, saya melihat '.$roomLabel.' di '.$item->nama_kos.' melalui BALIKOS. Mohon kabari saya jika kamar serupa tersedia.') }}" class="mt-5 block rounded-xl {{ $room->status === 'kosong' ? 'bg-[#166044] text-white' : 'border border-[#cad4ce] text-[#46564d]' }} py-3 text-center text-xs font-bold">{{ $room->status === 'kosong' ? 'Tanyakan kamar ini' : 'Tanya ketersediaan berikutnya' }}</a>
+                                                    @else<span class="mt-5 block rounded-xl bg-[#e9eeea] py-3 text-center text-xs text-[#758078]">Kontak belum tersedia</span>@endif
+                                                </div>
+                                            </section>
+                                        @endforeach
+                                    </div>
+
+                                    @if($item->aturan_kos)<div class="mt-7 rounded-xl bg-[#f7f8f4] p-4"><h4 class="text-sm font-extrabold">Aturan kos</h4><p class="mt-2 whitespace-pre-line text-sm leading-6 text-[#647269]">{{ $item->aturan_kos }}</p></div>@endif
+                                </div>
+                            </div>
                         </dialog>
                     </article>
                     @endforeach
@@ -124,6 +196,19 @@ document.getElementById('filter-toggle')?.addEventListener('click', () => docume
 document.querySelectorAll('.detail-btn').forEach(btn => btn.addEventListener('click', () => document.getElementById(btn.dataset.id).showModal()));
 document.querySelectorAll('.dialog-close').forEach(btn => btn.addEventListener('click', () => btn.closest('dialog').close()));
 document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if(e.target === d) d.close(); }));
+document.querySelectorAll('.room-gallery').forEach(gallery => {
+    const images = [...gallery.querySelectorAll('[data-gallery-image]')];
+    const card = gallery.closest('section');
+    const count = card.querySelector('.gallery-count');
+    let current = 0;
+    const show = index => {
+        current = (index + images.length) % images.length;
+        images.forEach((image, i) => image.classList.toggle('hidden', i !== current));
+        if (count) count.textContent = `${current + 1}/${images.length}`;
+    };
+    card.querySelector('.gallery-prev')?.addEventListener('click', () => show(current - 1));
+    card.querySelector('.gallery-next')?.addEventListener('click', () => show(current + 1));
+});
 const ownerAppDialog = document.getElementById('owner-app-dialog');
 document.getElementById('owner-app-button')?.addEventListener('click', () => ownerAppDialog.showModal());
 document.getElementById('owner-app-close')?.addEventListener('click', () => ownerAppDialog.close());
