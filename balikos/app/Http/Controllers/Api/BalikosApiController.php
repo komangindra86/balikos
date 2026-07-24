@@ -764,11 +764,7 @@ class BalikosApiController extends Controller
             abort_if((int) ($bill->kerugian_tunggakan ?? 0) > 0, 422, 'Tunggakan ini sudah tercatat sebagai kerugian dan DP tidak dapat dikoreksi.');
             abort_if($bill->status === 'lunas', 422, 'Pembayaran awal tidak dapat dikoreksi setelah tagihan lunas.');
 
-            $initial = DB::table('tagihan_pembayarans')
-                ->where('tagihan_id', $id)
-                ->where('sumber', 'pembayaran_awal')
-                ->lockForUpdate()
-                ->first();
+            $initial = $this->correctableInitialPayment($bill, true);
             abort_if(! $initial, 422, 'Tagihan ini tidak memiliki pembayaran awal yang dapat dikoreksi.');
 
             $otherPayments = (int) DB::table('tagihan_pembayarans')
@@ -788,6 +784,8 @@ class BalikosApiController extends Controller
                 DB::table('tagihan_pembayarans')->where('id', $initial->id)->update([
                     'nominal' => $paid,
                     'tanggal_bayar' => $data['tanggal_bayar'],
+                    'metode_pembayaran' => 'dp',
+                    'sumber' => 'pembayaran_awal',
                     'catatan' => 'DP masuk kamar (dikoreksi).',
                     'updated_at' => now(),
                 ]);
@@ -1454,13 +1452,43 @@ class BalikosApiController extends Controller
                 : (int) ($row->total_dibayar ?? ((int) $row->nominal + $fee));
             $row->bisa_koreksi_dp = (int) ($row->kerugian_tunggakan ?? 0) === 0
                 && $row->status !== 'lunas'
-                && DB::table('tagihan_pembayarans')
-                    ->where('tagihan_id', $row->id)
-                    ->where('sumber', 'pembayaran_awal')
-                    ->exists();
+                && $this->correctableInitialPayment($row) !== null;
         }
 
         return $row;
+    }
+
+    private function correctableInitialPayment(object $bill, bool $lock = false): ?object
+    {
+        $initialQuery = DB::table('tagihan_pembayarans')
+            ->where('tagihan_id', $bill->id)
+            ->where('sumber', 'pembayaran_awal');
+        if ($lock) {
+            $initialQuery->lockForUpdate();
+        }
+
+        $initial = $initialQuery->first();
+        if ($initial) {
+            return $initial;
+        }
+
+        $isLegacyDp = $bill->metode_pembayaran === 'dp'
+            && (int) ($bill->nominal_terbayar ?? 0) > 0
+            && (int) ($bill->nominal_terbayar ?? 0) < (int) $bill->nominal;
+        if (! $isLegacyDp) {
+            return null;
+        }
+
+        $legacyQuery = DB::table('tagihan_pembayarans')
+            ->where('tagihan_id', $bill->id)
+            ->where('sumber', 'riwayat_lama')
+            ->where('metode_pembayaran', 'dp')
+            ->where('nominal', (int) $bill->nominal_terbayar);
+        if ($lock) {
+            $legacyQuery->lockForUpdate();
+        }
+
+        return $legacyQuery->first();
     }
 
     private function booleanize(array $data, array $fields): array

@@ -424,11 +424,24 @@ class BalikosApiFlowTest extends TestCase
             ->assertJsonPath('summary.pendapatan_sewa', 500000)
             ->assertJsonPath('summary.laba_rugi', 500000);
 
+        DB::table('tagihan_pembayarans')
+            ->where('tagihan_id', $bill->id)
+            ->where('sumber', 'pembayaran_awal')
+            ->update([
+                'sumber' => 'riwayat_lama',
+                'catatan' => 'Riwayat pembayaran sebelum pencatatan pembayaran per transaksi diaktifkan.',
+            ]);
+        $this->withToken($owner['token'])
+            ->getJson('/api/balikos/tagihan/'.$bill->id)
+            ->assertOk()
+            ->assertJsonPath('data.bisa_koreksi_dp', true);
+
         $this->withToken($owner['token'])->putJson('/api/balikos/tagihan/'.$bill->id.'/pembayaran-awal', [
             'nominal' => 600000,
             'tanggal_bayar' => '2026-07-20',
         ])->assertOk()->assertJsonPath('data.nominal_terbayar', 600000);
         $this->assertSame(600000, (int) DB::table('tagihan_pembayarans')->where('tagihan_id', $bill->id)->sum('nominal'));
+        $this->assertSame('pembayaran_awal', DB::table('tagihan_pembayarans')->where('tagihan_id', $bill->id)->value('sumber'));
 
         $this->withToken($owner['token'])->putJson('/api/balikos/penghuni/'.$occupant['id'], [
             'status' => 'keluar',
