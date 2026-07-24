@@ -2,17 +2,20 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Balikos\PushNotificationService;
 use App\Services\Balikos\XenditInvoiceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 
 class BalikosPortalController extends Controller
 {
-    public function __construct(private readonly XenditInvoiceService $xendit) {}
+    public function __construct(
+        private readonly XenditInvoiceService $xendit,
+        private readonly PushNotificationService $pushNotifications
+    ) {}
 
     public function show(string $token)
     {
@@ -95,7 +98,7 @@ class BalikosPortalController extends Controller
 
         $kos = DB::table('kos')->where('id', $penghuni->kos_id)->first();
         if ($kos) {
-            $this->sendOwnerPush(
+            $this->pushNotifications->sendToUser(
                 (int) $kos->owner_id,
                 'Bukti pembayaran baru',
                 $penghuni->nama_lengkap.' mengirim bukti pembayaran. Silakan verifikasi di menu Tagihan.',
@@ -196,33 +199,5 @@ class BalikosPortalController extends Controller
             ->get();
 
         return compact('penghuni', 'kos', 'kamar', 'tagihan', 'paymentMethods', 'announcements');
-    }
-
-    private function sendOwnerPush(int $ownerId, string $title, string $body, array $data = []): void
-    {
-        $tokens = DB::table('push_notification_tokens')
-            ->where('user_id', $ownerId)
-            ->where('provider', 'expo')
-            ->pluck('token')
-            ->filter(fn ($token) => str_starts_with($token, 'ExponentPushToken[') || str_starts_with($token, 'ExpoPushToken['))
-            ->values();
-
-        if ($tokens->isEmpty()) {
-            return;
-        }
-
-        $messages = $tokens->map(fn ($token) => [
-            'to' => $token,
-            'sound' => 'default',
-            'title' => $title,
-            'body' => $body,
-            'data' => $data,
-        ])->all();
-
-        try {
-            Http::timeout(5)->post('https://exp.host/--/api/v2/push/send', $messages);
-        } catch (Throwable) {
-            //
-        }
     }
 }

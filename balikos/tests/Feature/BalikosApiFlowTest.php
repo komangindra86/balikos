@@ -96,16 +96,44 @@ class BalikosApiFlowTest extends TestCase
             'fasilitas_dapur_dalam' => true,
         ])->assertCreated()->json('data');
 
+        $this->withToken($token)->postJson('/api/balikos/kamar', [
+            'kos_id' => $kosId,
+            'nomor_kamar' => 'MANUAL-TERISI-'.random_int(10000, 99999),
+            'tipe_kamar' => 'Test',
+            'harga_bulanan' => 123000,
+            'status' => 'terisi',
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Status terisi akan aktif otomatis setelah penghuni dimasukkan.');
+
         $penghuni = $this->withToken($token)->postJson('/api/balikos/penghuni', [
             'kos_id' => $kosId,
             'kamar_id' => $room['id'],
             'nama_lengkap' => 'Penghuni Test',
             'no_wa' => '08123456789',
+            'catatan_pemilik' => 'Ingatkan pembayaran setiap tanggal 3.',
             'tanggal_masuk' => now()->toDateString(),
             'jatuh_tempo_hari' => 5,
             'status' => 'aktif',
-        ])->assertCreated()->json('data');
+        ])->assertCreated()
+            ->assertJsonPath('data.catatan_pemilik', 'Ingatkan pembayaran setiap tanggal 3.')
+            ->json('data');
 
+        $this->assertSame('terisi', DB::table('kamars')->where('id', $room['id'])->value('status'));
+        $this->withToken($token)->putJson('/api/balikos/penghuni/'.$penghuni['id'], [
+            'catatan_pemilik' => 'DP akan ditambah minggu depan.',
+        ])->assertOk()
+            ->assertJsonPath('data.catatan_pemilik', 'DP akan ditambah minggu depan.');
+        $this->get('/balikos/portal/'.$penghuni['portal_token'])
+            ->assertOk()
+            ->assertDontSee('DP akan ditambah minggu depan.');
+        $this->withToken($token)->putJson('/api/balikos/kamar/'.$room['id'], [
+            'status' => 'kosong',
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Kamar masih memiliki penghuni aktif. Keluarkan penghuni terlebih dahulu sebelum mengubah status kamar.');
+        $this->withToken($token)->putJson('/api/balikos/kamar/'.$room['id'], [
+            'status' => 'maintenance',
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Kamar masih memiliki penghuni aktif. Keluarkan penghuni terlebih dahulu sebelum mengubah status kamar.');
         $this->assertSame('terisi', DB::table('kamars')->where('id', $room['id'])->value('status'));
 
         Storage::fake('public');
@@ -190,9 +218,23 @@ class BalikosApiFlowTest extends TestCase
             'status' => 'maintenance',
         ])->assertOk()->assertJsonPath('data.status', 'maintenance');
 
+        $this->withToken($token)->postJson('/api/balikos/penghuni', [
+            'kos_id' => $kosId,
+            'kamar_id' => $room['id'],
+            'nama_lengkap' => 'Penghuni Saat Maintenance',
+            'tanggal_masuk' => now()->toDateString(),
+            'status' => 'aktif',
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Kamar harus berstatus kosong sebelum dapat diisi penghuni.');
+
         $this->withToken($token)->putJson('/api/balikos/kamar/'.$room['id'], [
             'status' => 'kosong',
         ])->assertOk()->assertJsonPath('data.status', 'kosong');
+
+        $this->withToken($token)->putJson('/api/balikos/kamar/'.$room['id'], [
+            'status' => 'terisi',
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Status terisi akan aktif otomatis setelah penghuni dimasukkan.');
     }
 
     public function test_owner_can_upload_multiple_room_photos(): void

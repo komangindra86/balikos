@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "42606162556",
+    "project_id": "balikos-bed38",
+    "storage_bucket": "balikos-bed38.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:42606162556:android:25796feddcf3f3ae904ff9",
+        "android_client_info": {
+          "package_name": "id.balisantih.balikos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMK-bNlhk93_b0pZNrHsFhRD7FjkvKaFU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

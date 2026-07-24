@@ -12,6 +12,8 @@ use Illuminate\Support\Str;
 
 class XenditInvoiceService
 {
+    public function __construct(private readonly PushNotificationService $pushNotifications) {}
+
     public function ensureInvoiceForBill(object $bill, ?string $portalToken = null): object
     {
         if (! empty($bill->gateway_invoice_url) && in_array($bill->gateway_status, [null, 'PENDING'], true)) {
@@ -231,6 +233,18 @@ class XenditInvoiceService
                 ]);
                 $this->recordRentPayment($bill, $rentPaidNow, $paymentDate);
                 $this->creditWalletOnce($bill);
+                DB::afterCommit(function () use ($bill) {
+                    $kos = DB::table('kos')->where('id', $bill->kos_id)->first();
+                    $penghuni = DB::table('penghunis')->where('id', $bill->penghuni_id)->first();
+                    if ($kos && $penghuni) {
+                        $this->pushNotifications->sendToUser(
+                            (int) $kos->owner_id,
+                            'Pembayaran QRIS berhasil',
+                            $penghuni->nama_lengkap.' sudah membayar tagihan melalui QRIS.',
+                            ['type' => 'qris_paid', 'tagihan_id' => (int) $bill->id, 'kos_id' => (int) $bill->kos_id]
+                        );
+                    }
+                });
             }
 
             DB::table('tagihans')->where('id', $bill->id)->update($update);

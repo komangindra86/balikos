@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Balikos\PushNotificationService;
 use App\Services\Balikos\XenditInvoiceService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -16,6 +17,8 @@ use Illuminate\Validation\Rule;
 
 class BalikosApiController extends Controller
 {
+    public function __construct(private readonly PushNotificationService $pushNotifications) {}
+
     public function register(Request $request)
     {
         $data = $request->validate([
@@ -187,7 +190,7 @@ class BalikosApiController extends Controller
     {
         $data = $request->validate([
             'token' => ['required', 'string', 'max:255'],
-            'provider' => ['nullable', Rule::in(['expo'])],
+            'provider' => ['nullable', Rule::in(['expo', 'fcm'])],
             'device_name' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -204,6 +207,37 @@ class BalikosApiController extends Controller
         );
 
         return response()->json(['message' => 'Token notifikasi tersimpan.']);
+    }
+
+    public function pushTokenDestroy(Request $request)
+    {
+        $data = $request->validate([
+            'token' => ['required', 'string', 'max:255'],
+        ]);
+
+        DB::table('push_notification_tokens')
+            ->where('user_id', $this->user($request)->id)
+            ->where('token', $data['token'])
+            ->delete();
+
+        return response()->json(['message' => 'Token notifikasi perangkat dihapus.']);
+    }
+
+    public function pushNotificationTest(Request $request)
+    {
+        $sent = $this->pushNotifications->sendToUser(
+            (int) $this->user($request)->id,
+            'Notifikasi BALIKOS aktif',
+            'Perangkat ini siap menerima pengingat tagihan dan pembayaran.',
+            ['type' => 'notification_test']
+        );
+
+        abort_if($sent === 0, 422, 'Belum ada perangkat aktif atau konfigurasi push belum siap.');
+
+        return response()->json([
+            'message' => 'Notifikasi uji berhasil dikirim.',
+            'sent' => $sent,
+        ]);
     }
 
     public function dashboard(Request $request)
@@ -298,6 +332,7 @@ class BalikosApiController extends Controller
     {
         $data = $request->validate($this->kamarRules());
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
+        abort_if($data['status'] === 'terisi', 422, 'Status terisi akan aktif otomatis setelah penghuni dimasukkan.');
         $data = $this->booleanize($data, $this->facilityFields());
         unset($data['foto'], $data['fotos'], $data['hapus_foto_ids']);
         $data['created_at'] = now();
@@ -337,6 +372,24 @@ class BalikosApiController extends Controller
         $data['kos_id'] = $data['kos_id'] ?? $row->kos_id;
         $this->assertOwnedKosId($request, (int) $data['kos_id']);
         $data = $this->booleanize($data, $this->facilityFields());
+        $hasActiveOccupant = DB::table('penghunis')
+            ->where('kamar_id', $id)
+            ->where('status', 'aktif')
+            ->exists();
+        if ($hasActiveOccupant) {
+            abort_if(
+                isset($data['status']) && $data['status'] !== 'terisi',
+                422,
+                'Kamar masih memiliki penghuni aktif. Keluarkan penghuni terlebih dahulu sebelum mengubah status kamar.'
+            );
+            $data['status'] = 'terisi';
+        } else {
+            abort_if(
+                ($data['status'] ?? null) === 'terisi',
+                422,
+                'Status terisi akan aktif otomatis setelah penghuni dimasukkan.'
+            );
+        }
 
         $deletedPhotoIds = collect($data['hapus_foto_ids'] ?? [])->map(fn ($value) => (int) $value)->filter()->values();
         unset($data['foto'], $data['fotos'], $data['hapus_foto_ids']);
@@ -524,7 +577,7 @@ class BalikosApiController extends Controller
 
         $kos = DB::table('kos')->where('id', $penghuni->kos_id)->first();
         if ($kos) {
-            $this->sendOwnerPush(
+            $this->pushNotifications->sendToUser(
                 (int) $kos->owner_id,
                 'Bukti pembayaran baru',
                 $penghuni->nama_lengkap.' mengirim bukti pembayaran. Silakan verifikasi di menu Tagihan.',
@@ -1151,17 +1204,32 @@ class BalikosApiController extends Controller
         }
 
         abort_if($query->exists(), 422, 'Kamar ini sudah memiliki penghuni aktif.');
+
+        $isCurrentOccupant = $exceptPenghuniId
+            && DB::table('penghunis')
+                ->where('id', $exceptPenghuniId)
+                ->where('kamar_id', $kamarId)
+                ->where('status', 'aktif')
+                ->exists();
+        if (! $isCurrentOccupant) {
+            $status = DB::table('kamars')->where('id', $kamarId)->value('status');
+            abort_if($status !== 'kosong', 422, 'Kamar harus berstatus kosong sebelum dapat diisi penghuni.');
+        }
     }
 
     private function syncRoomStatus(int $kamarId): void
     {
         $hasActive = DB::table('penghunis')->where('kamar_id', $kamarId)->where('status', 'aktif')->exists();
-        $status = $hasActive ? 'terisi' : 'kosong';
+        if ($hasActive) {
+            DB::table('kamars')->where('id', $kamarId)->update(['status' => 'terisi', 'updated_at' => now()]);
+
+            return;
+        }
 
         DB::table('kamars')
             ->where('id', $kamarId)
             ->where('status', '!=', 'maintenance')
-            ->update(['status' => $status, 'updated_at' => now()]);
+            ->update(['status' => 'kosong', 'updated_at' => now()]);
     }
 
     private function assertOwnedKategori(Request $request, ?int $kategoriId, int $kosId): void
@@ -1563,6 +1631,7 @@ class BalikosApiController extends Controller
             'pekerjaan' => ['nullable', 'string', 'max:255'],
             'no_kendaraan' => ['nullable', 'string', 'max:50'],
             'kontak_darurat' => ['nullable', 'string', 'max:255'],
+            'catatan_pemilik' => ['nullable', 'string', 'max:2000'],
             'tanggal_masuk' => [...$base, 'date'],
             'jatuh_tempo_hari' => ['nullable', 'integer', 'between:1,28'],
             'tanggal_keluar' => ['nullable', 'date'],
@@ -1658,34 +1727,6 @@ class BalikosApiController extends Controller
             'saldo_tersedia' => DB::raw('saldo_tersedia + '.$amount),
             'updated_at' => now(),
         ]);
-    }
-
-    private function sendOwnerPush(int $ownerId, string $title, string $body, array $data = []): void
-    {
-        $tokens = DB::table('push_notification_tokens')
-            ->where('user_id', $ownerId)
-            ->where('provider', 'expo')
-            ->pluck('token')
-            ->filter(fn ($token) => str_starts_with($token, 'ExponentPushToken[') || str_starts_with($token, 'ExpoPushToken['))
-            ->values();
-
-        if ($tokens->isEmpty()) {
-            return;
-        }
-
-        $messages = $tokens->map(fn ($token) => [
-            'to' => $token,
-            'sound' => 'default',
-            'title' => $title,
-            'body' => $body,
-            'data' => $data,
-        ])->all();
-
-        try {
-            Http::timeout(5)->post('https://exp.host/--/api/v2/push/send', $messages);
-        } catch (\Throwable $e) {
-            // Push failure must not block payment proof submission.
-        }
     }
 
     private function keuanganRules(bool $required = true): array

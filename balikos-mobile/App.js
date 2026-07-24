@@ -50,6 +50,7 @@ const monthOptions = [
 const emptyKosForm = { id: null, nama_kos: '', alamat: '', kecamatan: '', desa: '', banjar: '', no_wa: '', status: 'aktif' };
 const emptyRoomForm = {
   id: null,
+  has_active_occupant: false,
   nomor_kamar: '',
   tipe_kamar: 'Standard',
   harga_bulanan: '',
@@ -79,6 +80,7 @@ const emptyOccupantForm = {
   pekerjaan: '',
   no_kendaraan: '',
   kontak_darurat: '',
+  catatan_pemilik: '',
   tanggal_masuk: today(),
   status: 'aktif',
   pembayaran_awal: 'belum_bayar',
@@ -175,6 +177,29 @@ function BalikosApp() {
 
   useEffect(() => {
     if (tokenValue) registerPushToken();
+  }, [tokenValue]);
+
+  useEffect(() => {
+    if (!tokenValue || Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient') return undefined;
+
+    let responseSubscription;
+    let cancelled = false;
+    (async () => {
+      const Notifications = await import('expo-notifications');
+      responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+        openNotificationTarget(response.notification.request.content.data);
+      });
+      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      if (!cancelled && lastResponse) {
+        openNotificationTarget(lastResponse.notification.request.content.data);
+        await Notifications.clearLastNotificationResponseAsync();
+      }
+    })().catch((error) => console.warn('Notification listener setup failed', error?.message || error));
+
+    return () => {
+      cancelled = true;
+      responseSubscription?.remove();
+    };
   }, [tokenValue]);
 
   useEffect(() => {
@@ -313,8 +338,8 @@ function BalikosApp() {
           shouldSetBadge: true,
         }),
       });
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Pembayaran',
+      await Notifications.setNotificationChannelAsync('payments', {
+        name: 'Pembayaran dan Tagihan',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#0a63c7',
@@ -323,11 +348,38 @@ function BalikosApp() {
       const finalStatus = current.status === 'granted'
         ? current.status
         : (await Notifications.requestPermissionsAsync()).status;
-      if (finalStatus !== 'granted') return;
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-      const token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)).data;
-      await api('/push-token', { method: 'POST', body: { token, provider: 'expo', device_name: Device.modelName || 'android' } });
-    } catch {}
+      if (finalStatus !== 'granted') {
+        console.warn('Izin notifikasi belum diberikan.');
+        return;
+      }
+      const deviceToken = await Notifications.getDevicePushTokenAsync();
+      if (deviceToken.type !== 'fcm' || !deviceToken.data) {
+        console.warn('Token FCM tidak tersedia pada perangkat ini.');
+        return;
+      }
+      const token = deviceToken.data;
+      await api('/push-token', { method: 'POST', body: { token, provider: 'fcm', device_name: Device.modelName || 'android' } });
+      await AsyncStorage.setItem('push_notification_token', token);
+    } catch (error) {
+      console.warn('Push token registration failed', error?.message || error);
+    }
+  }
+
+  function openNotificationTarget(data = {}) {
+    if (data.kos_id) {
+      const kosId = Number(data.kos_id);
+      if (kosList.some((item) => Number(item.id) === kosId)) setActiveKosId(kosId);
+    }
+    if (data.type === 'payment_proof') {
+      setOccupantFilter('verifikasi');
+      setTab('penghuni');
+    } else if (data.type === 'due_bills') {
+      setOccupantFilter('jatuh_tempo');
+      setTab('penghuni');
+    } else if (data.type === 'qris_paid') {
+      setOccupantFilter('semua');
+      setTab('penghuni');
+    }
   }
 
   async function doLogin() {
@@ -601,7 +653,7 @@ function BalikosApp() {
       form.append('kos_id', String(activeKosId));
       if (roomForm.id) form.append('_method', 'PUT');
       Object.entries(roomForm).forEach(([key, value]) => {
-        if (['id', 'fotos', 'existing_fotos', 'hapus_foto_ids'].includes(key) || value === null || value === '') return;
+        if (['id', 'has_active_occupant', 'fotos', 'existing_fotos', 'hapus_foto_ids'].includes(key) || value === null || value === '') return;
         const payloadValue = key === 'harga_bulanan' ? cleanNumber(value) : value;
         form.append(key, typeof payloadValue === 'boolean' ? (payloadValue ? '1' : '0') : String(payloadValue));
       });
@@ -643,6 +695,7 @@ function BalikosApp() {
       pekerjaan: occupant.pekerjaan || '',
       no_kendaraan: occupant.no_kendaraan || '',
       kontak_darurat: occupant.kontak_darurat || '',
+      catatan_pemilik: occupant.catatan_pemilik || '',
       tanggal_masuk: occupant.tanggal_masuk || today(),
       status: occupant.status || 'aktif',
       pembayaran_awal: 'belum_bayar',
@@ -1159,7 +1212,20 @@ function BalikosApp() {
     }, 'Gagal membuka WhatsApp');
   }
 
+  async function testPushNotification() {
+    await submit(async () => {
+      await registerPushToken();
+      const response = await api('/push-token/test', { method: 'POST' });
+      Alert.alert('Notifikasi uji dikirim', response.message || 'Periksa notifikasi pada perangkat ini.');
+    }, 'Notifikasi belum siap');
+  }
+
   async function logout() {
+    const pushToken = await AsyncStorage.getItem('push_notification_token');
+    if (pushToken) {
+      await api('/push-token', { method: 'DELETE', body: { token: pushToken } }).catch(() => null);
+      await AsyncStorage.removeItem('push_notification_token');
+    }
     const logoutRequest = api('/logout', { method: 'POST' }).catch(() => null);
     resetAccountState();
     setPassword('');
@@ -1205,7 +1271,7 @@ function BalikosApp() {
         {tab === 'dashboard' && <Dashboard data={dashboard} occupants={occupants} activeKos={activeKos} setTab={setTab} setOccupantFilter={setOccupantFilter} />}
         {tab === 'kamar' && <RoomsScreen rooms={rooms} apiBase={apiBase} openRoomDetail={openRoomDetail} openRoomModal={openRoomCreateModal} />}
         {tab === 'penghuni' && <OccupantsScreen occupants={occupants} rooms={rooms} bills={bills} filter={occupantFilter} setFilter={setOccupantFilter} openOccupantModal={openOccupantModal} openOccupantDetail={setOccupantDetail} autoGenerateBills={autoGenerateBills} />}
-        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} openFinanceCreateModal={openFinanceCreateModal} openFinanceEditModal={openFinanceEditModal} deleteFinance={deleteFinance} downloadFinancePdf={downloadFinancePdf} announcements={announcements} openAnnouncementCreateModal={openAnnouncementCreateModal} openAnnouncementEditModal={openAnnouncementEditModal} deleteAnnouncement={deleteAnnouncement} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} setModal={setModal} logout={logout} />}
+        {tab === 'lainnya' && <MoreScreen screen={moreScreen} setScreen={setMoreScreen} paymentMethods={paymentMethods} paymentWallet={paymentWallet} finances={finances} financeSummary={financeSummary} financeFilter={financeFilter} openPeriodModal={openPeriodModal} openFinanceCreateModal={openFinanceCreateModal} openFinanceEditModal={openFinanceEditModal} deleteFinance={deleteFinance} downloadFinancePdf={downloadFinancePdf} announcements={announcements} openAnnouncementCreateModal={openAnnouncementCreateModal} openAnnouncementEditModal={openAnnouncementEditModal} deleteAnnouncement={deleteAnnouncement} toggleAnnouncement={toggleAnnouncement} togglePaymentMethod={togglePaymentMethod} deletePaymentMethod={deletePaymentMethod} testPushNotification={testPushNotification} setModal={setModal} logout={logout} />}
       </ScrollView>
       <BottomNav tab={tab} setTab={setTab} bottomInset={safeInsets.bottom} />
       <RoomDetailModal room={roomDetail} apiBase={apiBase} onClose={() => setRoomDetail(null)} onAddOccupant={openOccupantModal} onEdit={openRoomEditModal} onChangeStatus={openRoomStatusModal} onCheckout={checkoutOccupant} />
@@ -1420,6 +1486,7 @@ function OccupantsScreen({ occupants, rooms, bills, filter, setFilter, openOccup
       item.no_ktp,
       item.pekerjaan,
       item.no_kendaraan,
+      item.catatan_pemilik,
       Number(item.tagihan_aktif_count) > 0 ? 'tagihan belum bayar' : '',
       Number(item.tagihan_verifikasi_count) > 0 ? 'perlu verifikasi bukti bayar' : '',
       item.status === 'keluar' ? 'sudah keluar mantan penghuni' : '',
@@ -1508,7 +1575,7 @@ function BillsScreen({ bills, rooms, apiBase, openGenerate, openMultiPay, autoGe
   );
 }
 
-function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, openFinanceCreateModal, openFinanceEditModal, deleteFinance, downloadFinancePdf, announcements, openAnnouncementCreateModal, openAnnouncementEditModal, deleteAnnouncement, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, setModal, logout }) {
+function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances, financeSummary, financeFilter, openPeriodModal, openFinanceCreateModal, openFinanceEditModal, deleteFinance, downloadFinancePdf, announcements, openAnnouncementCreateModal, openAnnouncementEditModal, deleteAnnouncement, toggleAnnouncement, togglePaymentMethod, deletePaymentMethod, testPushNotification, setModal, logout }) {
   const activeMethod = paymentMethods.find((item) => Number(item.is_active) === 1 || item.is_active === true);
   return (
     <>
@@ -1551,13 +1618,13 @@ function MoreScreen({ screen, setScreen, paymentMethods, paymentWallet, finances
           {announcements.length === 0 ? <Empty text="Belum ada pengumuman." /> : null}
         </>
       )}
-      {screen === 'help' && <HelpScreen />}
+      {screen === 'help' && <HelpScreen testPushNotification={testPushNotification} />}
       <SecondaryButton title="Logout" onPress={logout} style={{ marginTop: spacing.lg }} />
     </>
   );
 }
 
-function HelpScreen() {
+function HelpScreen({ testPushNotification }) {
   const openEmail = () => {
     Linking.openURL('mailto:admin.balisantih@gmail.com?subject=Bantuan%20Aplikasi%20BALIKOS').catch(() => {
       Alert.alert('Email bantuan', 'Silakan hubungi admin.balisantih@gmail.com');
@@ -1589,6 +1656,9 @@ function HelpScreen() {
         </View>
       ))}
       <View style={styles.helpContactCard}>
+        <Text style={styles.cardTitle}>Notifikasi</Text>
+        <Text style={styles.muted}>Pastikan pengingat pembayaran dapat muncul sebelum aplikasi dibuka.</Text>
+        <SecondaryButton title="Uji Notifikasi" onPress={testPushNotification} style={{ marginTop: spacing.sm, marginBottom: spacing.lg }} />
         <Text style={styles.cardTitle}>Butuh bantuan?</Text>
         <Text style={styles.muted}>Jika mengalami kendala saat memakai aplikasi, hubungi admin BALIKOS melalui email berikut.</Text>
         <Pressable onPress={openEmail} style={({ pressed }) => [styles.emailButton, pressed && styles.pressed]}>
@@ -1638,7 +1708,7 @@ function RoomDetailModal({ room, apiBase, onClose, onAddOccupant, onEdit, onChan
           {canAdd ? <PrimaryButton title="Tambah Penghuni di Kamar Ini" onPress={() => onAddOccupant(room)} style={{ marginTop: spacing.md }} /> : null}
           {penghuni ? <SecondaryButton title="Keluarkan Penghuni" onPress={() => onCheckout(penghuni)} style={{ marginTop: spacing.md }} /> : null}
           <SecondaryButton title="Edit Kamar & Fasilitas" onPress={() => onEdit(room)} style={{ marginTop: spacing.md }} />
-          <SecondaryButton title="Ubah Status Kamar" onPress={() => onChangeStatus(room)} style={{ marginTop: spacing.md }} />
+          {!penghuni ? <SecondaryButton title="Ubah Status Kamar" onPress={() => onChangeStatus(room)} style={{ marginTop: spacing.md }} /> : null}
           <SecondaryButton title="Tutup" onPress={onClose} style={{ marginTop: spacing.md }} />
         </ScrollView>
       </View>
@@ -1700,7 +1770,8 @@ function OccupantDetailModal({ occupant, bills, rooms, apiBase, onClose, onEdit,
           <Text style={styles.sectionTitle}>Masa Tinggal</Text>
           <SimpleCard title="Tanggal" lines={[`Masuk ${occupant.tanggal_masuk || '-'}`, `Keluar ${occupant.tanggal_keluar || '-'}`]} />
           <Text style={styles.sectionTitle}>Lainnya</Text>
-          <SimpleCard title="Catatan Penghuni" lines={[occupant.pekerjaan || 'Pekerjaan -', occupant.alamat_asal || 'Alamat asal -', occupant.no_kendaraan || 'Kendaraan -']} />
+          <SimpleCard title="Informasi Penghuni" lines={[occupant.pekerjaan || 'Pekerjaan -', occupant.alamat_asal || 'Alamat asal -', occupant.no_kendaraan || 'Kendaraan -']} />
+          {occupant.catatan_pemilik ? <SimpleCard title="Catatan Pemilik (Pribadi)" lines={[occupant.catatan_pemilik]} /> : null}
           <SecondaryButton title="Edit Data Penghuni" onPress={() => onEdit(occupant)} style={{ marginTop: spacing.md }} />
           {occupant.status === 'aktif' ? <SecondaryButton title="Keluarkan Penghuni" onPress={() => onCheckout(occupant)} style={{ marginTop: spacing.md }} /> : null}
           <SecondaryButton title="Tutup" onPress={onClose} style={{ marginTop: spacing.md }} />
@@ -1746,11 +1817,18 @@ function RoomFormModal({ visible, form, setForm, apiBase, onPick, onSave, onClos
       <FormField label="Tipe kamar" value={form.tipe_kamar} onChangeText={(v) => setForm({ ...form, tipe_kamar: v })} placeholder="Standard, Deluxe, AC" />
       <FormField label="Harga bulanan" value={form.harga_bulanan} onChangeText={(v) => setForm({ ...form, harga_bulanan: formatNumberInput(v) })} keyboardType="number-pad" placeholder="1.200.000" helperText={form.harga_bulanan ? money(form.harga_bulanan) : 'Isi angka saja.'} />
       <Text style={styles.label}>Status kamar</Text>
-      <Segment items={['kosong', 'terisi', 'maintenance']} value={form.status} onChange={(status) => setForm({ ...form, status })} />
+      {form.has_active_occupant ? (
+        <View style={styles.lockedInfo}>
+          <Text style={styles.lockedTitle}>Terisi</Text>
+          <Text style={styles.muted}>Status mengikuti penghuni aktif dan tidak dapat diubah dari form kamar.</Text>
+        </View>
+      ) : (
+        <Segment items={['kosong', 'maintenance']} labels={{ kosong: 'Kosong', maintenance: 'Maintenance' }} value={form.status} onChange={(status) => setForm({ ...form, status })} />
+      )}
       <Text style={styles.label}>Fasilitas</Text>
       <Text style={styles.muted}>Aktifkan fasilitas yang tersedia di kamar ini.</Text>
       {facilityRows.map(([key, label]) => <ToggleRow key={key} label={label} value={form[key]} onValueChange={(value) => setForm({ ...form, [key]: value })} />)}
-      <FormField label="Catatan" value={form.catatan} onChangeText={(v) => setForm({ ...form, catatan: v })} multiline />
+      <FormField label="Catatan" value={form.catatan} onChangeText={(v) => setForm({ ...form, catatan: v })} multiline placeholder="Contoh: Harga kamar sudah termasuk air. Listrik dibayar terpisah." />
       <Text style={styles.label}>Foto kamar</Text>
       <Text style={styles.muted}>Maksimal 5 foto. Foto akan dikompresi agar aplikasi tetap ringan.</Text>
       {photos.length ? (
@@ -1821,6 +1899,7 @@ function OccupantFormModal({ visible, form, setForm, rooms, emptyRooms, apiBase,
       <FormField label="Alamat asal" value={form.alamat_asal} onChangeText={(v) => setForm({ ...form, alamat_asal: v })} multiline />
       <FormField label="No kendaraan" value={form.no_kendaraan} onChangeText={(v) => setForm({ ...form, no_kendaraan: v })} />
       <FormField label="Kontak darurat" value={form.kontak_darurat} onChangeText={(v) => setForm({ ...form, kontak_darurat: v })} />
+      <FormField label="Catatan pemilik" value={form.catatan_pemilik} onChangeText={(v) => setForm({ ...form, catatan_pemilik: v })} multiline placeholder="Contoh: Janji melunasi sisa pembayaran tanggal 25." helperText="Hanya untuk pengingat pemilik kos dan tidak tampil di portal penghuni." />
       <FooterButtons onClose={onClose} onSave={onSave} loading={loading} saveTitle={isEdit ? 'Simpan Perubahan' : 'Simpan Penghuni'} />
     </BaseModal>
   );
@@ -1877,9 +1956,9 @@ function MultiPayModal({ visible, form, setForm, rooms, occupant, onSave, onClos
 function RoomStatusModal({ visible, form, setForm, onSave, onClose, loading }) {
   return (
     <BaseModal visible={visible} title={`Status Kamar ${form.nomor_kamar || ''}`} onClose={onClose}>
-      <Text style={styles.muted}>Gunakan ini untuk mengubah kamar dari maintenance ke kosong, atau sebaliknya.</Text>
+      <Text style={styles.muted}>Pilih kosong jika kamar siap ditempati, atau maintenance jika kamar sedang diperbaiki dan belum dapat diisi.</Text>
       <Text style={styles.label}>Status kamar</Text>
-      <Segment items={['kosong', 'terisi', 'maintenance']} value={form.status} onChange={(status) => setForm({ ...form, status })} />
+      <Segment items={['kosong', 'maintenance']} labels={{ kosong: 'Kosong', maintenance: 'Maintenance' }} value={form.status} onChange={(status) => setForm({ ...form, status })} />
       <FooterButtons onClose={onClose} onSave={onSave} loading={loading} />
     </BaseModal>
   );
@@ -2162,10 +2241,11 @@ function roomToForm(room) {
   return {
     ...emptyRoomForm,
     id: room.id,
+    has_active_occupant: Boolean(room.penghuni_aktif),
     nomor_kamar: String(room.nomor_kamar || ''),
     tipe_kamar: String(room.tipe_kamar || ''),
     harga_bulanan: formatNumberInput(room.harga_bulanan),
-    status: room.status || 'kosong',
+    status: room.penghuni_aktif ? 'terisi' : (room.status === 'terisi' ? 'kosong' : (room.status || 'kosong')),
     fasilitas_ac: isTruthy(room.fasilitas_ac),
     fasilitas_km_dalam: isTruthy(room.fasilitas_km_dalam),
     fasilitas_dapur_dalam: isTruthy(room.fasilitas_dapur_dalam),

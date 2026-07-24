@@ -22,9 +22,11 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
-      "versionCode": 12,
+      "versionCode": 13,
+      "googleServicesFile": "./google-services.json",
       "permissions": [
-        "READ_MEDIA_IMAGES"
+        "READ_MEDIA_IMAGES",
+        "POST_NOTIFICATIONS"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -34,7 +36,15 @@
     "plugins": [
       "expo-web-browser",
       "expo-sharing",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#0a63c7",
+          "defaultChannel": "payments"
+        }
+      ]
     ]
   }
 }

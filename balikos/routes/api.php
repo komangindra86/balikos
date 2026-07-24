@@ -29,6 +29,8 @@ Route::prefix('balikos')->group(function () {
         Route::post('/logout', [BalikosApiController::class, 'logout']);
         Route::get('/me', [BalikosApiController::class, 'me']);
         Route::post('/push-token', [BalikosApiController::class, 'pushTokenStore']);
+        Route::delete('/push-token', [BalikosApiController::class, 'pushTokenDestroy']);
+        Route::post('/push-token/test', [BalikosApiController::class, 'pushNotificationTest']);
         Route::get('/dashboard', [BalikosApiController::class, 'dashboard']);
 
         Route::get('/kos', [BalikosApiController::class, 'kosIndex']);

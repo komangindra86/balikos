@@ -40,6 +40,10 @@ return [
         'web_client_id' => env('GOOGLE_WEB_CLIENT_ID'),
     ],
 
+    'firebase' => [
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+    ],
+
     'xendit' => [
         'secret_key' => env('XENDIT_SECRET_KEY'),
         'mode' => env('XENDIT_MODE', 'production'),
