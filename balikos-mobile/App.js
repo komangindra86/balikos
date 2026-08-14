@@ -549,8 +549,6 @@ function BalikosApp() {
     const used = (roomForm.existing_fotos?.length || 0) + (roomForm.fotos?.length || 0);
     const remaining = Math.max(0, 5 - used);
     if (remaining <= 0) return Alert.alert('Foto sudah maksimal', 'Maksimal 5 foto untuk setiap kamar.');
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return Alert.alert('Izin foto diperlukan', 'Izinkan akses foto agar bisa upload foto kamar.');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: true,
