@@ -22,7 +22,7 @@
     ],
     "android": {
       "package": "id.balisantih.balikos",
-      "versionCode": 14,
+      "versionCode": 15,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "POST_NOTIFICATIONS"
